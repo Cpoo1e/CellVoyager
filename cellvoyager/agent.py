@@ -54,7 +54,7 @@ class AnalysisAgentV2:
                 e.g. jupyter_port=8888, auto_start_jupyter=True, stop_jupyter_on_complete=False.
         """
         self.h5ad_path = h5ad_path
-        self.paper_summary = open(paper_summary_path).read()
+        self.paper_summary = open(paper_summary_path, encoding='utf-8').read()
         self.openai_api_key = openai_api_key
         self.model_name = model_name
         self.analysis_name = analysis_name
@@ -80,18 +80,18 @@ class AnalysisAgentV2:
         os.makedirs(self.output_dir, exist_ok=True)
 
         # Coding guidelines (same as agent.py)
-        self._analyses_overview = open(os.path.join(self.prompt_dir, "DeepResearch_Analyses.txt")).read()
+        self._analyses_overview = open(os.path.join(self.prompt_dir, "DeepResearch_Analyses.txt"), encoding='utf-8').read()
         if self.use_VLM:
             coding_guidelines_template = open(
-                os.path.join(self.prompt_dir, "coding_guidelines.txt")
+                os.path.join(self.prompt_dir, "coding_guidelines.txt"), encoding='utf-8'
             ).read()
         else:
             coding_guidelines_template = open(
-                os.path.join(self.prompt_dir, "ablations", "coding_guidelines_NO_VLM_ABLATION.txt")
+                os.path.join(self.prompt_dir, "ablations", "coding_guidelines_NO_VLM_ABLATION.txt"), encoding='utf-8'
             ).read()
 
         self.coding_system_prompt = open(
-            os.path.join(self.prompt_dir, "coding_system_prompt.txt")
+            os.path.join(self.prompt_dir, "coding_system_prompt.txt"), encoding='utf-8'
         ).read().format(max_iterations=self.max_iterations)
 
         self.coding_guidelines = coding_guidelines_template.format(
