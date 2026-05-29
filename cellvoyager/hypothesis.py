@@ -1,6 +1,6 @@
 """
 Hypothesis generation module.
-Extracted from agent.py - Phase 1: Idea Generation. s
+Extracted from agent.py - Phase 1: Idea Generation.
 """
 
 import json
