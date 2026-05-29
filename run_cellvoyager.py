@@ -1,18 +1,22 @@
 """
 CLI entry point for CellVoyager analysis.
 """
+
+import argparse
 import json
 import os
-import argparse
 from pathlib import Path
-from dotenv import load_dotenv
+
 from cellvoyager.agent import AnalysisAgentV2
+from dotenv import load_dotenv
 
 load_dotenv()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run CellVoyager analysis agent (v2 with modular execution)")
+    parser = argparse.ArgumentParser(
+        description="Run CellVoyager analysis agent (v2 with modular execution)"
+    )
 
     # REQUIRED arguments
     parser.add_argument(
@@ -74,6 +78,19 @@ def main():
         default="claude-sonnet-4-6",
         help="LLM model for hypothesis generation — OpenAI, Anthropic, or Kimi/Moonshot (e.g. o3-mini, gpt-4o, claude-sonnet-4-5, kimi-k2.5). Default: claude-sonnet-4-6",
     )
+
+    parser.add_argument(
+        "--local-llm",
+        default=None,
+        help="enables the use of a local LLM for hypothesis generation.",
+    )
+
+    parser.add_argument(
+        "hypothesis_debug",
+        default=False,
+        help="If set, the agent will print out the full hypothesis generation response and exit instead of running full analysis",
+    )
+
     parser.add_argument(
         "--execution-model",
         default=None,
@@ -188,7 +205,9 @@ def main():
     if needs_openai and not openai_api_key:
         print("❌ Error: OPENAI_API_KEY environment variable not set")
         print("Please set your OpenAI API key: export OPENAI_API_KEY='your-key-here'")
-        print("(Not required when using --execution-mode claude without --deepresearch)")
+        print(
+            "(Not required when using --execution-mode claude without --deepresearch)"
+        )
         return 1
 
     # Resume mode: handle separately before normal validation
@@ -199,10 +218,15 @@ def main():
         out_dir = Path(args.resume_output_dir)
         config_path = out_dir / ".run_config.json"
         if not config_path.exists():
-            print("❌ Error: No run config found. Run config is created when starting from the GUI.")
+            print(
+                "❌ Error: No run config found. Run config is created when starting from the GUI."
+            )
             return 1
         cfg = json.loads(config_path.read_text(encoding="utf-8"))
-        notebook_path = out_dir / f"{cfg['analysis_name']}_analysis_{args.resume_analysis_idx}.ipynb"
+        notebook_path = (
+            out_dir
+            / f"{cfg['analysis_name']}_analysis_{args.resume_analysis_idx}.ipynb"
+        )
         if not notebook_path.exists():
             print(f"❌ Error: Notebook not found: {notebook_path}")
             return 1
@@ -214,8 +238,14 @@ def main():
         if exec_mode != "claude":
             print("❌ Error: Resume only supports execution_mode=claude")
             return 1
-        intervene = args.resume_intervene_every if args.resume_intervene_every is not None else cfg.get("intervene_every", 1)
-        print("🔄 Resume mode: restoring kernel state, then entering interactive mode...")
+        intervene = (
+            args.resume_intervene_every
+            if args.resume_intervene_every is not None
+            else cfg.get("intervene_every", 1)
+        )
+        print(
+            "🔄 Resume mode: restoring kernel state, then entering interactive mode..."
+        )
         resume_exec_kwargs = {
             "jupyter_port": args.jupyter_port,
             "jupyter_token": args.jupyter_token,
