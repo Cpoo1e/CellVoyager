@@ -81,7 +81,7 @@ def main():
 
     parser.add_argument(
         "--local-llm",
-        default=None,
+        action="store_true",
         help="enables the use of a local LLM for hypothesis generation.",
     )
 
@@ -199,6 +199,12 @@ def main():
         help="Override intervene_every for resume (e.g. 999 to run to completion without pausing).",
     )
 
+    parser.add_argument(
+        "--api-base-url",
+        default=None,
+        help="Base URL for LLM API (e.g. for proxy or custom provider). If not set, will use default for the specified model.",
+    )
+
     args = parser.parse_args()
 
     # OpenAI API key — required for legacy execution mode and deep research,
@@ -284,6 +290,7 @@ def main():
             execution_mode=exec_mode,
             anthropic_api_key=anthropic_api_key,
             hypothesis_debug=args.hypothesis_debug,
+            api_base_url=args.api_base_url,
             **resume_exec_kwargs,
         )
         try:
@@ -365,6 +372,7 @@ def main():
         execution_mode=args.execution_mode,
         anthropic_api_key=args.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY"),
         hypothesis_debug=args.hypothesis_debug,
+        api_base_url=args.api_base_url,
         **execution_kwargs,
     )
 

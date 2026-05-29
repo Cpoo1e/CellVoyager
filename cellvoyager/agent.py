@@ -45,6 +45,7 @@ class AnalysisAgentV2:
         execution_mode="legacy",
         anthropic_api_key=None,
         hypothesis_debug=False,
+        api_base_url=None,
         **execution_kwargs,
     ):
         """
@@ -84,6 +85,7 @@ class AnalysisAgentV2:
         self.use_self_critique = use_self_critique
         self.use_VLM = use_VLM
         self.use_documentation = use_documentation
+        self.api_base_url = api_base_url
 
         if not self.hypothesis_debug_mode:
             os.makedirs(self.output_dir, exist_ok=True)
@@ -171,6 +173,7 @@ class AnalysisAgentV2:
             max_iterations=self.max_iterations,
             deepresearch_background=self.deepresearch_background,
             log_prompts=self.log_prompts,
+            api_base_url=self.api_base_url,
         )
 
         # (2) Idea execution module

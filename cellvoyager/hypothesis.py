@@ -76,7 +76,7 @@ class HypothesisGenerator:
 
     def __init__(
         self,
-        model_name,
+        model_name,  # kept for backward compat, unused
         prompt_dir,
         coding_guidelines,
         coding_system_prompt,
@@ -88,10 +88,12 @@ class HypothesisGenerator:
         max_iterations=6,
         deepresearch_background="",
         log_prompts=False,
+        api_base_url=None,
         client=None,  # kept for backward compat, unused
     ):
         # Ensure litellm can route the model — add provider prefix if needed
         self.model_name = _normalize_model_name(model_name)
+
         self.prompt_dir = prompt_dir
         self.coding_guidelines = coding_guidelines
         self.coding_system_prompt = coding_system_prompt
@@ -103,6 +105,7 @@ class HypothesisGenerator:
         self.max_iterations = max_iterations
         self.deepresearch_background = deepresearch_background
         self.log_prompts = log_prompts
+        self.api_base_url = api_base_url
 
     def _format_messages_for_log(self, messages: list) -> str:
         """Readable formatting for LLM chat messages."""
@@ -123,11 +126,20 @@ class HypothesisGenerator:
             )
 
         try:
-            result = _instructor_client.chat.completions.create(
-                model=self.model_name,
-                messages=list(messages),
-                response_model=AnalysisPlan,
-            )
+            if self.api_base_url:
+                result = _instructor_client.chat.completions.create(
+                    model=self.model_name,
+                    messages=list(messages),
+                    response_model=AnalysisPlan,
+                    api_base=self.api_base_url,
+                )
+
+            else:
+                result = _instructor_client.chat.completions.create(
+                    model=self.model_name,
+                    messages=list(messages),
+                    response_model=AnalysisPlan,
+                )
 
             output = result.model_dump()
 
@@ -158,10 +170,18 @@ class HypothesisGenerator:
             )
 
         try:
-            response = litellm.completion(
-                model=self.model_name,
-                messages=list(messages),
-            )
+            if self.api_base_url:
+                response = litellm.completion(
+                    model=self.model_name,
+                    messages=list(messages),
+                    api_base=self.api_base_url,
+                )
+
+            else:
+                response = litellm.completion(
+                    model=self.model_name,
+                    messages=list(messages),
+                )
 
             content = response.choices[0].message.content
 
