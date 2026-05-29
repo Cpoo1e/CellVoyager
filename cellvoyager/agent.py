@@ -536,7 +536,6 @@ class AnalysisAgentV2:
                 print("\n" + "=" * 80)
                 print(f"HYPOTHESIS DEBUG: Analysis {analysis_idx + 1}")
                 print("=" * 80)
-                print(analysis)
 
                 generated_analyses.append(analysis)
 
