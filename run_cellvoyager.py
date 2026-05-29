@@ -86,9 +86,12 @@ def main():
     )
 
     parser.add_argument(
-        "hypothesis_debug",
-        default=False,
-        help="If set, the agent will print out the full hypothesis generation response and exit instead of running full analysis",
+        "--hypothesis-debug",
+        action="store_true",
+        help=(
+            "Only run hypothesis generation, print the full response, "
+            "and exit without creating notebooks or running execution."
+        ),
     )
 
     parser.add_argument(
@@ -201,7 +204,11 @@ def main():
     # OpenAI API key — required for legacy execution mode and deep research,
     # optional for claude execution mode.
     openai_api_key = os.getenv("OPENAI_API_KEY")
-    needs_openai = (args.execution_mode != "claude") or args.deepresearch
+
+    needs_openai = args.local_llm is None and (
+        args.execution_mode != "claude" or args.deepresearch
+    )
+
     if needs_openai and not openai_api_key:
         print("❌ Error: OPENAI_API_KEY environment variable not set")
         print("Please set your OpenAI API key: export OPENAI_API_KEY='your-key-here'")
@@ -227,6 +234,7 @@ def main():
             out_dir
             / f"{cfg['analysis_name']}_analysis_{args.resume_analysis_idx}.ipynb"
         )
+
         if not notebook_path.exists():
             print(f"❌ Error: Notebook not found: {notebook_path}")
             return 1
@@ -275,6 +283,7 @@ def main():
             use_deepresearch_background=cfg.get("use_deepresearch", False),
             execution_mode=exec_mode,
             anthropic_api_key=anthropic_api_key,
+            hypothesis_debug=args.hypothesis_debug,
             **resume_exec_kwargs,
         )
         try:
@@ -289,7 +298,7 @@ def main():
             return 1
 
     # Check Anthropic API key when using claude execution
-    if args.execution_mode == "claude":
+    if args.execution_mode == "claude" and not args.hypothesis_debug:
         anthropic_api_key = args.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
         if not anthropic_api_key:
             print("❌ Error: ANTHROPIC_API_KEY required for --execution-mode claude")
@@ -355,20 +364,29 @@ def main():
         use_deepresearch_background=args.deepresearch,
         execution_mode=args.execution_mode,
         anthropic_api_key=args.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY"),
+        hypothesis_debug=args.hypothesis_debug,
         **execution_kwargs,
     )
 
-    try:
-        print("🔬 Running analyses...")
-        agent.run()
-        print("\n✅ Analysis complete!")
+    if args.hypothesis_debug:
+        print(
+            "🔍 Hypothesis generation debug mode enabled. Generating hypotheses and printing full response..."
+        )
+        agent.run_hypothesis_debug()
+        print("\n✅ Hypothesis generation complete!")
         return 0
-    except KeyboardInterrupt:
-        print("\n⚠️ Analysis interrupted by user")
-        return 1
-    except Exception as e:
-        print(f"❌ Error during analysis: {e}")
-        return 1
+    else:
+        try:
+            print("🔬 Running analyses...")
+            agent.run()
+            print("\n✅ Analysis complete!")
+            return 0
+        except KeyboardInterrupt:
+            print("\n⚠️ Analysis interrupted by user")
+            return 1
+        except Exception as e:
+            print(f"❌ Error during analysis: {e}")
+            return 1
 
 
 if __name__ == "__main__":
