@@ -20,6 +20,11 @@ litellm.drop_params = True  # ignore unsupported params per-model silently
 # for all OpenAI and Anthropic models uniformly.
 _instructor_client = instructor.from_litellm(litellm.completion)
 
+_ollama_instructor_client = instructor.from_litellm(
+    litellm.completion,
+    mode=instructor.Mode.JSON,
+)
+
 
 _MODEL_ALIASES = {
     "gpt-5.3": "openai/gpt-5.3-chat-latest",
@@ -126,20 +131,25 @@ class HypothesisGenerator:
             )
 
         try:
-            if self.api_base_url:
-                result = _instructor_client.chat.completions.create(
-                    model=self.model_name,
-                    messages=list(messages),
-                    response_model=AnalysisPlan,
-                    api_base=self.api_base_url,
-                )
+            is_ollama = self.model_name.startswith(("ollama/", "ollama_chat/"))
 
-            else:
-                result = _instructor_client.chat.completions.create(
-                    model=self.model_name,
-                    messages=list(messages),
-                    response_model=AnalysisPlan,
-                )
+            client = _ollama_instructor_client if is_ollama else _instructor_client
+
+            kwargs = {
+                "model": self.model_name,
+                "messages": list(messages),
+                "response_model": AnalysisPlan,
+                "max_retries": 2,
+            }
+
+            if self.api_base_url:
+                kwargs["api_base"] = self.api_base_url
+
+            if is_ollama:
+                kwargs["format"] = AnalysisPlan.model_json_schema()
+                kwargs["timeout"] = 300.0
+
+            result = client.chat.completions.create(**kwargs)
 
             output = result.model_dump()
 
