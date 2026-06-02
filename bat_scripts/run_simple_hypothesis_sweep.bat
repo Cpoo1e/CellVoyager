@@ -6,7 +6,7 @@ REM CellVoyager hypothesis-generation sweep
 set "REPEATS=3"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\processed_data\processed_filtered.h5ad"
-set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\summarys\Detailed.txt"
+set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\summarys\No_paper_background.txt"
 set "LOGS=%ROOT%\logs\Hypothesis_generation"
 
 cd /d "%ROOT%"
@@ -18,7 +18,7 @@ call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
 call :RUN_LOCAL "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507"
 
 REM -------- Cloud models --------
-call :RUN_CLOUD "gpt-4o" "gpt4o"
+@REM call :RUN_CLOUD "gpt-4o" "gpt4o"
 call :RUN_CLOUD "o3-mini" "o3mini"
 call :RUN_CLOUD "gpt-5.5" "gpt55"
 
