@@ -7,7 +7,7 @@ set "REPEATS=3"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\processed_data\processed_filtered.h5ad"
 set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\summarys\No_paper_background.txt"
-set "LOGS=%ROOT%\logs\Hypothesis_generation"
+set "LOGS=%ROOT%\logs\Hypothesis_basic_prompt"
 
 cd /d "%ROOT%"
 
