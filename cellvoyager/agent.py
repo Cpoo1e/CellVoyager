@@ -70,6 +70,7 @@ class AnalysisAgentV2:
         self.log_prompts = log_prompts
         self.max_fix_attempts = max_fix_attempts
         self.use_deepresearch_background = use_deepresearch_background
+        self.api_base_url = api_base_url
 
         if output_dir is not None:
             self.output_dir = os.path.abspath(output_dir)
@@ -80,7 +81,12 @@ class AnalysisAgentV2:
                 output_home, "outputs", f"{analysis_name}_{timestamp}"
             )
 
-        self.client = openai.OpenAI(api_key=openai_api_key) if openai_api_key else None
+        #TODO swap with local model
+        if self.api_base_url:
+            self.client = openai.OpenAI(api_key="ollama", base_url=api_base_url+"/v1")
+        
+        elif openai_api_key:
+            self.client = openai.OpenAI(api_key=openai_api_key)
 
         self.use_self_critique = use_self_critique
         self.use_VLM = use_VLM
@@ -177,10 +183,14 @@ class AnalysisAgentV2:
         )
 
         # (2) Idea execution module
+        executor_model_name = self.model_name
+        if executor_model_name.startswith(("ollama/", "ollama_chat/")):
+            executor_model_name = executor_model_name.split("/", 1)[1]
+
         shared_executor_kwargs = dict(
             hypothesis_generator=self.hypothesis_generator,
             client=self.client,
-            model_name=self.model_name,
+            model_name=executor_model_name,
             prompt_dir=self.prompt_dir,
             coding_guidelines=self.coding_guidelines,
             coding_system_prompt=self.coding_system_prompt,
