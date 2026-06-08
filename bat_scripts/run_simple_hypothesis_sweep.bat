@@ -5,9 +5,9 @@ REM CellVoyager hypothesis-generation sweep
 
 set "REPEATS=3"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
-set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\processed_data\processed_filtered.h5ad"
-set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\summarys\No_paper_background.txt"
-set "LOGS=%ROOT%\logs\Hypothesis_basic_prompt"
+set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\unprocessed.h5ad"
+set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\No_paper_background.txt"
+set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Hypothesis_unprocessed_06_06"
 
 cd /d "%ROOT%"
 
@@ -19,8 +19,8 @@ call :RUN_LOCAL "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507
 
 REM -------- Cloud models --------
 @REM call :RUN_CLOUD "gpt-4o" "gpt4o"
-call :RUN_CLOUD "o3-mini" "o3mini"
-call :RUN_CLOUD "gpt-5.5" "gpt55"
+@REM call :RUN_CLOUD "o3-mini" "o3mini"
+@REM call :RUN_CLOUD "gpt-5.5" "gpt55"
 
 pause
 exit /b
@@ -44,7 +44,7 @@ for /L %%R in (1,1,%REPEATS%) do (
       --analysis-name "%NAME%_r%%R" ^
       --model-name "ollama_chat/%MODEL%" ^
       --api-base-url "http://localhost:11434" ^
-      --log-home "%LOGS%" ^
+      --log-home "%LOGS%_unprocessed" ^
       --log-prompts
 )
 
@@ -62,7 +62,7 @@ for /L %%R in (1,1,%REPEATS%) do (
       --hypothesis-debug ^
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
-      --analysis-name "%NAME%_r%%R" ^
+      --analysis-name "%NAME%_r%%R_unprocessed" ^
       --model-name "%MODEL%" ^
       --log-home "%LOGS%" ^
       --log-prompts
