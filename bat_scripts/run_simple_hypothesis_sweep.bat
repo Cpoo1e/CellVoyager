@@ -4,10 +4,10 @@ setlocal
 REM CellVoyager hypothesis-generation sweep
 
 set "REPEATS=3"
-set "ROOT=C:\Users\callum.poole\Documents\MastersProject"
-set "H5AD=C:\Users\callum.poole\Documents\MastersProject\Data\ProcessedData\hypo_test_unprocessed.h5ad"
-set "PAPER=C:\Users\callum.poole\Documents\MastersProject\TestPrompts\Detailed_unprocessed.txt"
-set "LOGS=C:\Users\callum.poole\Documents\MastersProject\msc-project\results\logs\04_06_Hypothesis_unprocessed"
+set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
+set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\unprocessed.h5ad"
+set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\No_paper_background.txt"
+set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Hypothesis_unprocessed_06_06"
 
 cd /d "%ROOT%"
 

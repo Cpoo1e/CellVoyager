@@ -81,10 +81,19 @@ class AnalysisAgentV2:
                 output_home, "outputs", f"{analysis_name}_{timestamp}"
             )
 
-        #TODO swap with local model
+        # TODO swap with local model
+        self.client = None
+
         if self.api_base_url:
-            self.client = openai.OpenAI(api_key="ollama", base_url=api_base_url+"/v1")
-        
+            executor_base_url = self.api_base_url.rstrip("/")
+            if not executor_base_url.endswith("/v1"):
+                executor_base_url += "/v1"
+
+            self.client = openai.OpenAI(
+                api_key=openai_api_key or "ollama",
+                base_url=executor_base_url,
+            )
+
         elif openai_api_key:
             self.client = openai.OpenAI(api_key=openai_api_key)
 
