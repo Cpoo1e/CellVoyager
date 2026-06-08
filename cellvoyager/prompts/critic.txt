@@ -20,14 +20,14 @@ Code for first step in analysis plan:
 
 {CODING_GUIDELINES}
 
+Summary of the research paper:
+{paper_txt}
+
 You are given the following summary of the anndata object:
 {adata_summary}
 
 Here is the Jupyter notebook containing the previous steps and their generated interpretations. Make sure the modified code builds on the past analyses and doesn't repeat any of them:
 {jupyter_notebook}
-
-Summary of the research paper:
-{paper_txt}
 
 Previous Analysis Attempted:
 {past_analyses}

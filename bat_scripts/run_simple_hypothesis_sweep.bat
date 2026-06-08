@@ -7,14 +7,14 @@ set "REPEATS=3"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\unprocessed.h5ad"
 set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\No_paper_background.txt"
-set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Hypothesis_unprocessed_06_06"
+set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Hypothesis_unprocessed_08_06_short_Qwen3"
 
 cd /d "%ROOT%"
 
 REM -------- Local models --------
-call :RUN_LOCAL "gemma3:4b" "gemma3_4b"
-call :RUN_LOCAL "llama3.1:8b" "llama31_8b"
-call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
+@REM call :RUN_LOCAL "gemma3:4b" "gemma3_4b"
+@REM call :RUN_LOCAL "llama3.1:8b" "llama31_8b"
+@REM call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
 call :RUN_LOCAL "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507"
 
 REM -------- Cloud models --------
@@ -41,7 +41,7 @@ for /L %%R in (1,1,%REPEATS%) do (
       --hypothesis-debug ^
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
-      --analysis-name "%NAME%_r%%R" ^
+      --analysis-name "%NAME%_r%%R_short" ^
       --model-name "ollama_chat/%MODEL%" ^
       --api-base-url "http://localhost:11434" ^
       --log-home "%LOGS%_unprocessed" ^
@@ -62,7 +62,7 @@ for /L %%R in (1,1,%REPEATS%) do (
       --hypothesis-debug ^
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
-      --analysis-name "%NAME%_r%%R_unprocessed" ^
+      --analysis-name "%NAME%_r%%R" ^
       --model-name "%MODEL%" ^
       --log-home "%LOGS%" ^
       --log-prompts
