@@ -6,8 +6,6 @@ Return:
 
 Ensure that your output is in the specified JSON format.
 
-You should determin the correct pipline entry point, before constructing the analysis plan you must determine which preprocessing steps have already been completed, DO NOT REPEAT THESE STEPS.
-
 {CODING_GUIDELINES}
 
 For the analysis plan, think of the analysis plan as a scientific workflow:

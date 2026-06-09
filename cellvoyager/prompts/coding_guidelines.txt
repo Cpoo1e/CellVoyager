@@ -1,11 +1,10 @@
 Guidelines for constructing the analyses:
     1. Use statistical tests and figures where applicable.
-    2. Each analysis should be entirely self-contained within the provided AnnData object, this is already loaded. PAY ATTENTION TO META DATA FEILDS ALREADY PROVIDED
+    2. Each analysis should be entirely self-contained within the provided AnnData object, PAY ATTENTION TO META DATA FEILDS ALREADY PROVIDED
     3. You can only use the following Python packages: {available_packages}. DO NOT USE ANY OTHER PACKAGES.
-    4. The path to the anndata object is {adata_path} 
+    4. The annData is already loaded, DO NOT RELOAD IT
     5. You should determin the correct pipline entry point, before constructing the analysis plan you must determine which preprocessing steps have already been completed, DO NOT REPEAT THESE STEPS.
     6. If QC has already been complete as determined in guideline number 5 you should not plot QC figures and move on to the next step in the analysis.
 
 Here is some suggestions of single celled RNA seq methods you could use, YOU ARE NOT LIMITED TO THESE:
 {analyses_overview}
-

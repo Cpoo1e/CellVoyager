@@ -152,7 +152,7 @@ class AnalysisAgentV2:
                     "Loading h5ad metadata for summarization (no full AnnData load)..."
                 )
                 self.adata_summary = self._summarize_adata_obs_only(
-                    self.h5ad_path, length_cutoff=25
+                    self.h5ad_path, length_cutoff=5
                 )
             else:
                 print("Loading anndata for summarization...")
@@ -232,7 +232,7 @@ class AnalysisAgentV2:
             else:
                 self.executor = IdeaExecutor(**shared_executor_kwargs)
 
-    def _summarize_adata_full(self, h5ad_path, length_cutoff=25):
+    def _summarize_adata_full(self, h5ad_path, length_cutoff=5):
         """Summarize all AnnData attributes: .obs, .var, .obsm, .layers, .uns, .obsp, .varp."""
         try:
             adata = anndata.read_h5ad(h5ad_path, backed="r")

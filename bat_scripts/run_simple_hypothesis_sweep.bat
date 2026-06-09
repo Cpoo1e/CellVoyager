@@ -5,9 +5,9 @@ REM CellVoyager hypothesis-generation sweep
 
 set "REPEATS=5"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
-set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\unprocessed.h5ad"
+set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\processed_filtered.h5ad"
 set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\No_paper_background.txt"
-set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Hypothesis_unprocessed_08_06_Qwen3_FurtherInfo"
+set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Hypothesis_short_Qwen3_final\processed"
 
 cd /d "%ROOT%"
 
