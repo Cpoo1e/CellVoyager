@@ -3,7 +3,7 @@ setlocal
 
 REM CellVoyager hypothesis-generation sweep
 
-set "REPEATS=5"
+set "REPEATS=1"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\processed_filtered.h5ad"
 set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\No_paper_background.txt"

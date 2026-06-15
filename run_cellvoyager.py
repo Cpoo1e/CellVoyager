@@ -95,6 +95,19 @@ def main():
     )
 
     parser.add_argument(
+        "--from-analysis-json",
+        action="append",
+        metavar="PATH",
+        dest="from_analysis_json",
+        default=None,
+        help=(
+            "Path to a *_plan.json file saved by a previous run. Hypothesis generation is "
+            "skipped entirely and the saved plan is executed directly. Repeat the flag for "
+            "multiple analyses, e.g. --from-analysis-json run1/my_analysis_1_plan.json."
+        ),
+    )
+
+    parser.add_argument(
         "--execution-model",
         default=None,
         help="Anthropic model for the Claude execution agent (e.g. claude-sonnet-4-6, claude-opus-4-6). Defaults to the Claude Code CLI default.",
@@ -376,6 +389,19 @@ def main():
         **execution_kwargs,
     )
 
+    # Resolve --from-analysis-json paths into pre-built analysis dicts
+    prebuilt_analyses = None
+    if args.from_analysis_json:
+        prebuilt_analyses = []
+        for json_path in args.from_analysis_json:
+            json_path = os.path.abspath(json_path)
+            if not os.path.exists(json_path):
+                print(f"❌ Error: analysis JSON not found: {json_path}")
+                return 1
+            with open(json_path, encoding="utf-8") as fh:
+                prebuilt_analyses.append(json.load(fh))
+        print(f"Loaded {len(prebuilt_analyses)} pre-built analysis plan(s) — skipping hypothesis generation.")
+
     if args.hypothesis_debug:
         print(
             "🔍 Hypothesis generation debug mode enabled. Generating hypotheses and printing full response..."
@@ -386,7 +412,9 @@ def main():
     else:
         try:
             print("🔬 Running analyses...")
-            agent.run()
+            agent.run(
+                prebuilt_analyses=prebuilt_analyses,
+            )
             print("\n✅ Analysis complete!")
             return 0
         except KeyboardInterrupt:

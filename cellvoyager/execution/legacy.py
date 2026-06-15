@@ -2,14 +2,15 @@
 Idea execution module.
 Extracted from agent.py - Phase 2: Idea Execution.
 """
+
+import json
 import os
 import re
-import json
-import base64
-import datetime
+
 import nbformat as nbf
-from nbformat.v4 import new_code_cell, new_output
 from jupyter_client import KernelManager
+from nbformat.v4 import new_code_cell, new_output
+
 from cellvoyager.utils import get_documentation
 
 AVAILABLE_PACKAGES = "scanpy, anndata, matplotlib, numpy, seaborn, pandas, scipy"
@@ -75,9 +76,13 @@ class IdeaExecutor:
         code_cells = []
         for cell in notebook_cells:
             if cell.get("cell_type") == "code":
-                code_cells.append(cell["source"] if isinstance(cell, dict) else cell.source)
+                code_cells.append(
+                    cell["source"] if isinstance(cell, dict) else cell.source
+                )
 
-        self.code_memory = code_cells[-self.code_memory_size :] if len(code_cells) > 0 else []
+        self.code_memory = (
+            code_cells[-self.code_memory_size :] if len(code_cells) > 0 else []
+        )
 
     def generate_jupyter_summary(self, notebook_cells):
         """Generate a comprehensive summary of notebook cells including source code and outputs (including errors)"""
@@ -86,14 +91,24 @@ class IdeaExecutor:
 
         jupyter_summary = ""
         for cell in notebook_cells:
-            cell_type = cell.get("cell_type") if isinstance(cell, dict) else getattr(cell, "cell_type", None)
-            source = cell.get("source", "") if isinstance(cell, dict) else getattr(cell, "source", "")
+            cell_type = (
+                cell.get("cell_type")
+                if isinstance(cell, dict)
+                else getattr(cell, "cell_type", None)
+            )
+            source = (
+                cell.get("source", "")
+                if isinstance(cell, dict)
+                else getattr(cell, "source", "")
+            )
             if cell_type in ("code", "markdown", "error"):
                 jupyter_summary += f"{source}\n"
 
         return jupyter_summary
 
-    def generate_next_step_analysis(self, analysis, attempted_analyses, notebook_cells, num_steps_left, seeded):
+    def generate_next_step_analysis(
+        self, analysis, attempted_analyses, notebook_cells, num_steps_left, seeded
+    ):
         hypothesis = analysis["hypothesis"]
         analysis_plan = analysis["analysis_plan"]
         first_step_code = analysis["first_step_code"]
@@ -144,45 +159,63 @@ class IdeaExecutor:
                 result = response.choices[0].message.content
 
                 if result is None:
-                    print(f"⚠️ API returned None response in generate_next_step (attempt {attempt + 1})")
+                    print(
+                        f"⚠️ API returned None response in generate_next_step (attempt {attempt + 1})"
+                    )
                     if attempt == max_retries:
-                        raise ValueError("OpenAI API returned None response for next step after all retries")
+                        raise ValueError(
+                            "OpenAI API returned None response for next step after all retries"
+                        )
                     continue
 
                 try:
                     analysis = json.loads(result)
                 except json.JSONDecodeError as e:
-                    print(f"⚠️ JSON decode error in generate_next_step (attempt {attempt + 1}): {e}")
+                    print(
+                        f"⚠️ JSON decode error in generate_next_step (attempt {attempt + 1}): {e}"
+                    )
                     if attempt == max_retries:
                         raise
                     continue
 
                 if "analysis_plan" not in analysis:
                     if attempt == max_retries:
-                        raise ValueError("Generated analysis missing 'analysis_plan' key after all retries")
+                        raise ValueError(
+                            "Generated analysis missing 'analysis_plan' key after all retries"
+                        )
                     continue
 
                 if not isinstance(analysis["analysis_plan"], list):
                     if attempt == max_retries:
-                        raise ValueError("Generated analysis 'analysis_plan' is not a list after all retries")
+                        raise ValueError(
+                            "Generated analysis 'analysis_plan' is not a list after all retries"
+                        )
                     continue
 
                 if len(analysis["analysis_plan"]) == 0:
                     if attempt == max_retries:
-                        raise ValueError("Generated analysis has empty 'analysis_plan' after all retries")
+                        raise ValueError(
+                            "Generated analysis has empty 'analysis_plan' after all retries"
+                        )
                     continue
 
                 if len(analysis["analysis_plan"]) > num_steps_left:
                     if attempt == max_retries:
                         print(f"   Truncating analysis plan to {num_steps_left} steps")
-                        analysis["analysis_plan"] = analysis["analysis_plan"][:num_steps_left]
+                        analysis["analysis_plan"] = analysis["analysis_plan"][
+                            :num_steps_left
+                        ]
 
-                print(f"✅ Valid analysis plan generated (attempt {attempt + 1}): {len(analysis['analysis_plan'])} steps")
+                print(
+                    f"✅ Valid analysis plan generated (attempt {attempt + 1}): {len(analysis['analysis_plan'])} steps"
+                )
                 break
 
             except Exception as e:
                 if attempt == max_retries:
-                    print(f"❌ All retry attempts failed for generate_next_step_analysis")
+                    print(
+                        "❌ All retry attempts failed for generate_next_step_analysis"
+                    )
                     raise
                 print(f"⚠️ Attempt {attempt + 1} failed: {e}. Retrying...")
                 continue
@@ -192,18 +225,33 @@ class IdeaExecutor:
 
         return analysis
 
-    def fix_code(self, code, error, other_code="", documentation=""):
+    def fix_code(
+        self,
+        code,
+        error,
+        other_code="",
+        documentation="",
+        fix_attempt=1,
+        max_fix_attempts=3,
+        previous_code="",
+    ):
         """Attempts to fix code that produced an error"""
         max_error_chars = 2000
         max_other_code_chars = 3000
         max_past_context_chars = 4000
         max_documentation_chars = 3000
 
-        truncated_error = error[-max_error_chars:] if len(error) > max_error_chars else error
+        truncated_error = (
+            error[-max_error_chars:] if len(error) > max_error_chars else error
+        )
         if len(error) > max_error_chars:
             truncated_error = "...(error truncated)...\n" + truncated_error
 
-        truncated_other_code = other_code[-max_other_code_chars:] if len(other_code) > max_other_code_chars else other_code
+        truncated_other_code = (
+            other_code[-max_other_code_chars:]
+            if len(other_code) > max_other_code_chars
+            else other_code
+        )
         if len(other_code) > max_other_code_chars:
             truncated_other_code = "...(context truncated)...\n" + truncated_other_code
 
@@ -211,19 +259,30 @@ class IdeaExecutor:
         if self.code_memory:
             past_cells = self.code_memory[-5:]
             past_code_context = "\n\n".join(
-                [f"# Previous code cell {i+1}:\n{cell}" for i, cell in enumerate(past_cells)]
+                [
+                    f"# Previous code cell {i + 1}:\n{cell}"
+                    for i, cell in enumerate(past_cells)
+                ]
             )
             if len(past_code_context) > max_past_context_chars:
                 past_code_context = past_code_context[-max_past_context_chars:]
                 past_code_context = "...(context truncated)...\n" + past_code_context
 
         truncated_documentation = (
-            documentation[-max_documentation_chars:] if len(documentation) > max_documentation_chars else documentation
+            documentation[-max_documentation_chars:]
+            if len(documentation) > max_documentation_chars
+            else documentation
         )
         if len(documentation) > max_documentation_chars:
-            truncated_documentation = "...(documentation truncated)...\n" + truncated_documentation
+            truncated_documentation = (
+                "...(documentation truncated)...\n" + truncated_documentation
+            )
 
         prompt = f"""Fix this code that produced an error:
+
+        This is fix attempt {fix_attempt}/{max_fix_attempts}.
+        You must produce a materially different fix than the previous failed code.
+        Do not return the same code unchanged.
 
         Code:
         ```python
@@ -242,6 +301,14 @@ class IdeaExecutor:
         Here are the past code cells for additional context (last 5 cells):
         {past_code_context}"""
 
+        if previous_code:
+            prompt += f"""
+
+        Previous failed code (do not repeat this unchanged):
+        ```python
+        {previous_code}
+        ```"""
+
         if self.use_documentation and truncated_documentation:
             prompt += f"""
 
@@ -250,12 +317,17 @@ class IdeaExecutor:
 
         estimated_tokens = len(prompt) // 4
         if estimated_tokens > 50000:
-            print(f"⚠️ Warning: Large fix_code prompt detected ({estimated_tokens} estimated tokens)")
+            print(
+                f"⚠️ Warning: Large fix_code prompt detected ({estimated_tokens} estimated tokens)"
+            )
 
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=[
-                {"role": "system", "content": "You are a coding assistant helping to fix code."},
+                {
+                    "role": "system",
+                    "content": "You are a coding assistant helping to fix code.",
+                },
                 {"role": "user", "content": prompt},
             ],
         )
@@ -286,7 +358,9 @@ class IdeaExecutor:
 
         return response.choices[0].message.content.strip()
 
-    def interpret_results(self, notebook, past_analyses, hypothesis, analysis_plan, code):
+    def interpret_results(
+        self, notebook, past_analyses, hypothesis, analysis_plan, code
+    ):
         last_cell = notebook.cells[-1]
         no_interpretation = "No results found"
 
@@ -309,7 +383,9 @@ class IdeaExecutor:
                     if output.get("output_type") == "display_data":
                         image_data = output.get("data", {}).get("image/png")
                         if image_data:
-                            image_outputs.append({"data": image_data, "format": "image/png"})
+                            image_outputs.append(
+                                {"data": image_data, "format": "image/png"}
+                            )
 
             if not text_output and not image_outputs:
                 return no_interpretation
@@ -339,7 +415,9 @@ class IdeaExecutor:
                         user_content.append(
                             {
                                 "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{image_data}"},
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{image_data}"
+                                },
                             }
                         )
                     except Exception as e:
@@ -361,6 +439,7 @@ class IdeaExecutor:
                 image_outputs.clear()
                 user_content.clear()
                 import gc
+
                 gc.collect()
         else:
             response = self.client.chat.completions.create(
@@ -448,7 +527,9 @@ class IdeaExecutor:
 
             if msg_type == "stream":
                 outputs.append(
-                    new_output(output_type="stream", name=content["name"], text=content["text"])
+                    new_output(
+                        output_type="stream", name=content["name"], text=content["text"]
+                    )
                 )
             elif msg_type == "execute_result":
                 outputs.append(
@@ -488,7 +569,9 @@ class IdeaExecutor:
 
     def create_initial_notebook(self, hypothesis):
         notebook = nbf.v4.new_notebook()
-        notebook.cells.append(nbf.v4.new_markdown_cell(f"# Analysis\n\n**Hypothesis**: {hypothesis}"))
+        notebook.cells.append(
+            nbf.v4.new_markdown_cell(f"# Analysis\n\n**Hypothesis**: {hypothesis}")
+        )
 
         setup_code = f"""import scanpy as sc
 import numpy as np
@@ -512,7 +595,7 @@ sns.set_context('notebook', font_scale=1.2)
 
 # Load data
 print("Loading data...")
-adata = sc.read_h5ad("{self.h5ad_path}")
+adata = sc.read_h5ad(r'''{self.h5ad_path}''')
 print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
 """
         notebook.cells.append(nbf.v4.new_code_cell(setup_code))
@@ -544,7 +627,9 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                             )
                         elif output.get("output_type") == "display_data":
                             cleaned_outputs.append(
-                                nbf.v4.new_output("display_data", data=output.get("data", {}))
+                                nbf.v4.new_output(
+                                    "display_data", data=output.get("data", {})
+                                )
                             )
                         elif output.get("output_type") == "error":
                             cleaned_outputs.append(
@@ -576,22 +661,26 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
         """
 
         def namer(analysis_idx, step_idx):
-            return f"{analysis_idx+1}_{step_idx}"
+            return f"{analysis_idx + 1}_{step_idx}"
 
         hypotheses_analysis = []
         self.code_memory = []
 
-        print(f"\n🚀 Executing Analysis {analysis_idx+1}")
+        print(f"\n🚀 Executing Analysis {analysis_idx + 1}")
 
         if not self.start_persistent_kernel():
-            print(f"⚠️ Failed to start kernel for analysis {analysis_idx+1}. Skipping...")
+            print(
+                f"⚠️ Failed to start kernel for analysis {analysis_idx + 1}. Skipping..."
+            )
             return past_analyses
 
         hypothesis = analysis["hypothesis"]
         analysis_plan = analysis["analysis_plan"]
         current_code = analysis["first_step_code"]
 
-        plan_markdown = "# Analysis Plan\n\n**Hypothesis**: " + hypothesis + "\n\n## Steps:\n"
+        plan_markdown = (
+            "# Analysis Plan\n\n**Hypothesis**: " + hypothesis + "\n\n## Steps:\n"
+        )
         for step in analysis_plan:
             plan_markdown += f"- {step}\n"
 
@@ -601,7 +690,9 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
         notebook.cells.append(nbf.v4.new_markdown_cell(plan_markdown))
 
         if analysis_plan:
-            notebook.cells.append(nbf.v4.new_markdown_cell(f"## {analysis['code_description']}"))
+            notebook.cells.append(
+                nbf.v4.new_markdown_cell(f"## {analysis['code_description']}")
+            )
 
         current_code = strip_code_markers(current_code)
         notebook.cells.append(new_code_cell(current_code))
@@ -613,13 +704,15 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
 
             if success:
                 self.logger.log_response(
-                    f"STEP {iteration + 1} RAN SUCCESSFULLY - Analysis {analysis_idx+1}",
+                    f"STEP {iteration + 1} RAN SUCCESSFULLY - Analysis {analysis_idx + 1}",
                     f"step_execution_success_{step_name}",
                 )
                 results_interpretation = self.interpret_results(
                     notebook, past_analyses, hypothesis, analysis_plan, current_code
                 )
-                self.logger.log_response(results_interpretation, f"results_interpretation_{step_name}")
+                self.logger.log_response(
+                    results_interpretation, f"results_interpretation_{step_name}"
+                )
                 interpretation_cell = nbf.v4.new_markdown_cell(
                     f"### Agent Interpretation\n\n{results_interpretation}"
                 )
@@ -628,7 +721,7 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
             else:
                 print(f"⚠️ Code errored with: {error_msg}")
                 self.logger.log_response(
-                    f"STEP {iteration + 1} FAILED - Analysis {analysis_idx+1}\n\nCode:\n```python\n{current_code}\n\n Error:\n{error_msg}```",
+                    f"STEP {iteration + 1} FAILED - Analysis {analysis_idx + 1}\n\nCode:\n```python\n{current_code}\n\n Error:\n{error_msg}```",
                     f"step_execution_failed_{step_name}",
                 )
                 fix_attempt, fix_successful = 0, False
@@ -636,6 +729,7 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                 while fix_attempt < self.max_fix_attempts and not fix_successful:
                     fix_attempt += 1
                     print(f"  🔧 Fix attempt {fix_attempt}/{self.max_fix_attempts}")
+                    previous_code = current_code
 
                     documentation = ""
                     if self.use_documentation:
@@ -645,8 +739,27 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                             print(f"⚠️ Documentation extraction failed: {e}")
                             documentation = ""
 
-                    current_code = self.fix_code(current_code, error_msg, documentation=documentation)
+                    current_code = self.fix_code(
+                        current_code,
+                        error_msg,
+                        documentation=documentation,
+                        fix_attempt=fix_attempt,
+                        max_fix_attempts=self.max_fix_attempts,
+                        previous_code=previous_code,
+                    )
                     current_code = strip_code_markers(current_code)
+
+                    # Stop retry loop if model returns effectively identical code.
+                    if current_code.strip() == previous_code.strip():
+                        print(
+                            "Fix attempt returned unchanged code. Stopping retries early."
+                        )
+                        self.logger.log_response(
+                            f"FIX ATTEMPT UNCHANGED {fix_attempt}/{self.max_fix_attempts} - Analysis {analysis_idx + 1}, Step {iteration + 1}. Returned identical code; stopping retries early.",
+                            f"fix_attempt_unchanged_{step_name}_{fix_attempt}",
+                        )
+                        break
+
                     notebook.cells[-1] = nbf.v4.new_code_cell(current_code)
 
                     success, error_msg, notebook = self.run_last_cell(notebook)
@@ -655,10 +768,12 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                         fix_successful = True
                         print(f"  ✅ Fix successful on attempt {fix_attempt}")
                         self.logger.log_response(
-                            f"FIX SUCCESSFUL on attempt {fix_attempt}/{self.max_fix_attempts} - Analysis {analysis_idx+1}, Step {iteration + 2}",
+                            f"FIX SUCCESSFUL on attempt {fix_attempt}/{self.max_fix_attempts} - Analysis {analysis_idx + 1}, Step {iteration + 2}",
                             f"fix_attempt_success_{step_name}_{fix_attempt}",
                         )
-                        updated_description = self.generate_code_description(current_code)
+                        updated_description = self.generate_code_description(
+                            current_code
+                        )
                         for i in range(len(notebook.cells) - 1, -1, -1):
                             cell = notebook.cells[i]
                             if (
@@ -669,10 +784,15 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                                 cell.source = f"## {updated_description}"
                                 break
                         results_interpretation = self.interpret_results(
-                            notebook, past_analyses, hypothesis, analysis_plan, current_code
+                            notebook,
+                            past_analyses,
+                            hypothesis,
+                            analysis_plan,
+                            current_code,
                         )
                         self.logger.log_response(
-                            results_interpretation, f"results_interpretation_{step_name}"
+                            results_interpretation,
+                            f"results_interpretation_{step_name}",
                         )
                         interpretation_cell = nbf.v4.new_markdown_cell(
                             f"### Agent Interpretation\n\n{results_interpretation}"
@@ -682,7 +802,7 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                     else:
                         print(f"  ❌ Fix attempt {fix_attempt} failed")
                         self.logger.log_response(
-                            f"FIX ATTEMPT FAILED {fix_attempt}/{self.max_fix_attempts} - Analysis {analysis_idx+1}, Step {iteration + 1}: {error_msg}\n\nCode:\n```python\n{current_code}\n```",
+                            f"FIX ATTEMPT FAILED {fix_attempt}/{self.max_fix_attempts} - Analysis {analysis_idx + 1}, Step {iteration + 1}: {error_msg}\n\nCode:\n```python\n{current_code}\n```",
                             f"fix_attempt_failed_{step_name}_{fix_attempt}",
                         )
                         if fix_attempt == self.max_fix_attempts:
@@ -690,12 +810,10 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                                 f"  ⚠️ Failed to fix after {self.max_fix_attempts} attempts. Moving to next iteration."
                             )
                             self.logger.log_response(
-                                f"ALL FIX ATTEMPTS EXHAUSTED - Analysis {analysis_idx+1}, Step {iteration + 1}. Failed after {self.max_fix_attempts} attempts.",
+                                f"ALL FIX ATTEMPTS EXHAUSTED - Analysis {analysis_idx + 1}, Step {iteration + 1}. Failed after {self.max_fix_attempts} attempts.",
                                 f"fix_attempt_exhausted_{step_name}",
                             )
-                            results_interpretation = (
-                                "Current analysis step failed to run. Try an alternative approach"
-                            )
+                            results_interpretation = "Current analysis step failed to run. Try an alternative approach"
                             interpretation_cell = nbf.v4.new_markdown_cell(
                                 f"### Agent Interpretation\n\n{results_interpretation}"
                             )
@@ -729,16 +847,19 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                     else "No additional analysis steps generated"
                 )
                 self.logger.log_response(
-                    f"NEXT STEP PLAN - Analysis {analysis_idx+1}, Step {iteration + 2}: {first_step_description}\n\nCode:\n```python\n{next_step_analysis['first_step_code']}\n```",
+                    f"NEXT STEP PLAN - Analysis {analysis_idx + 1}, Step {iteration + 2}: {first_step_description}\n\nCode:\n```python\n{next_step_analysis['first_step_code']}\n```",
                     f"initial_analysis_{step_name}",
                 )
 
                 if self.use_self_critique:
                     modified_analysis = self.hypothesis_generator.get_feedback(
-                        next_step_analysis, past_analyses, notebook.cells, num_steps_left
+                        next_step_analysis,
+                        past_analyses,
+                        notebook.cells,
+                        num_steps_left,
                     )
                     self.logger.log_response(
-                        f"APPLIED SELF-CRITIQUE - Analysis {analysis_idx+1}, Step {iteration + 2}",
+                        f"APPLIED SELF-CRITIQUE - Analysis {analysis_idx + 1}, Step {iteration + 2}",
                         f"self_critique_{step_name}",
                     )
                     hypothesis = modified_analysis["hypothesis"]
@@ -746,14 +867,16 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                     current_code = modified_analysis["first_step_code"]
                     self.logger.log_response(
                         f"Revised Hypothesis: {hypothesis}\n\nRevised Analysis Plan:\n"
-                        + "\n".join([f"{i+1}. {step}" for i, step in enumerate(analysis_plan)])
+                        + "\n".join(
+                            [f"{i + 1}. {step}" for i, step in enumerate(analysis_plan)]
+                        )
                         + f"\n\nRevised Code:\n{current_code}",
                         f"revised_analysis_{step_name}",
                     )
                 else:
                     print("🚫 Skipping feedback on next step (no self-critique)")
                     self.logger.log_response(
-                        f"SKIPPING INITIAL SELF-CRITIQUE - Analysis {analysis_idx+1}",
+                        f"SKIPPING INITIAL SELF-CRITIQUE - Analysis {analysis_idx + 1}",
                         f"no_self_critique_{step_name}",
                     )
                     modified_analysis = next_step_analysis
@@ -764,12 +887,19 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                 )
 
                 steps_text = "\n".join(
-                    [f"Step {i+1}: {item}" for i, item in enumerate(modified_analysis["analysis_plan"])]
+                    [
+                        f"Step {i + 1}: {item}"
+                        for i, item in enumerate(modified_analysis["analysis_plan"])
+                    ]
                 )
-                next_step_cell = nbf.v4.new_markdown_cell(f"## Next Steps\n{steps_text}")
+                next_step_cell = nbf.v4.new_markdown_cell(
+                    f"## Next Steps\n{steps_text}"
+                )
                 notebook.cells.append(next_step_cell)
                 code_description = modified_analysis["code_description"]
-                notebook.cells.append(nbf.v4.new_markdown_cell(f"## {code_description}"))
+                notebook.cells.append(
+                    nbf.v4.new_markdown_cell(f"## {code_description}")
+                )
                 modified_code = strip_code_markers(modified_analysis["first_step_code"])
                 notebook.cells.append(new_code_cell(modified_code))
                 current_code = modified_code
@@ -777,7 +907,7 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
             self.update_code_memory(notebook.cells)
 
         notebook_path = os.path.join(
-            self.output_dir, f"{self.analysis_name}_analysis_{analysis_idx+1}.ipynb"
+            self.output_dir, f"{self.analysis_name}_analysis_{analysis_idx + 1}.ipynb"
         )
         with open(notebook_path, "w", encoding="utf-8") as f:
             clean_notebook = self.cleanup_notebook_outputs(notebook)
@@ -785,7 +915,7 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
             print(f"💾 Saved notebook to: {notebook_path}")
 
         self.logger.log_response(
-            f"ANALYSIS {analysis_idx+1} COMPLETED - Notebook saved to: {notebook_path}",
+            f"ANALYSIS {analysis_idx + 1} COMPLETED - Notebook saved to: {notebook_path}",
             "analysis_complete",
         )
 
@@ -793,12 +923,13 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
 
         del notebook
         import gc
+
         gc.collect()
 
-        print(f"✅ Completed Analysis {analysis_idx+1}")
+        print(f"✅ Completed Analysis {analysis_idx + 1}")
 
         if hypotheses_analysis:
-            analysis_summary = f"Analysis {analysis_idx+1}: {hypothesis}\n"
+            analysis_summary = f"Analysis {analysis_idx + 1}: {hypothesis}\n"
             return past_analyses + analysis_summary
         else:
             return past_analyses
