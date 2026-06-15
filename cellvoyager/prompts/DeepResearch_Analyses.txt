@@ -1,22 +1,18 @@
-## Dimensionality Reduction 
-UMAP, PCA, T-SNE
+Before proposing analysis steps, first decide:
 
-## Neighborhood Graph Construction
-Build a k-nearest-neighbor graph for clustering and visualization from PCA or latent.
+What processing has already been completed (First step should complete any preprocessing still required).
+What biological comparison or hypothesis is being tested.
+Which methods are necessary, optional, or inappropriate.
 
-## Clustering
-Identify groups of similar cells (e.g. cell types or states) in an unsupervised way, leiden or louvain algorithms.
+Optional method to include (Not limited to what is below):
 
+PreProcessing: Basic filtering, Normalization and log transformation (ONLY USE IF DATA IS UN PROCESSED)
+Dimensionality reduction: PCA, UMAP, t-SNE, or latent embeddings where needed for visualization, clustering, or representation.
+Neighborhood graph construction: clustering, UMAP, or graph-based analysis is required.
+Cell type annotation: clusters cell populations with biological labels using known marker genes (should focus on cell types related to the dataset), and metadata colums if appropiate.
+Differential expression or marker detection: use when comparing clusters, cell types, conditions, or timepoints.
+Gene Set Enrichment Analysis: determine whether a pre-defined group of genes (e.g., a specific biological pathway) shows statistically significant:
+Trajectory or pseudotime analysis: only use if the biological question involves a continuous process such as differentiation, activation, or temporal progression.
+Visualization: include plots that directly validate or communicate the chosen analysis.
 
-## Trajectory and Pseudotime Analysis
-Model continuous developmental or differentiation processes.
-
-## Differential Expression and Marker Gene Detection
-Identify genes that are characteristic of clusters or conditions.
-
-
-## Gene Signature Scoring
-Quantify the expression of gene sets per cell.
-
-## Visualization
-Plot results (embeddings, marker expression, QC) to interpret data.
+Do not include a method just because it appears in this list, you can also use methods that are not on this list if they are biologically meaningful.
