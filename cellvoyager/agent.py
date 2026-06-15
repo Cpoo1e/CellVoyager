@@ -442,12 +442,30 @@ class AnalysisAgentV2:
         print(f"Loaded obs data: {len(df)} rows × {len(df.columns)} columns")
         return df
 
-    def run(self, seeded_hypotheses=None):
+    def _save_analysis_plan(self, analysis: dict, analysis_idx: int) -> None:
+        """Save the analysis plan dict as JSON so it can be reused with --from-analysis-json."""
+        import json
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        plan_path = os.path.join(
+            self.output_dir,
+            f"{self.analysis_name}_analysis_{analysis_idx + 1}_plan.json",
+        )
+        try:
+            with open(plan_path, "w", encoding="utf-8") as f:
+                json.dump(analysis, f, indent=2, ensure_ascii=False, default=str)
+            print(f"Analysis plan saved to {plan_path}")
+        except Exception as e:
+            print(f"Could not save analysis plan JSON: {e}")
+
+    def run(self, seeded_hypotheses=None, prebuilt_analyses=None):
         """
         Main run method that orchestrates both idea generation and execution phases.
 
         Args:
             seeded_hypotheses: Optional list of hypothesis strings for AI to develop into full analyses.
+            prebuilt_analyses: Optional list of pre-built analysis dicts (loaded from plan JSON files).
+                When provided, bypasses hypothesis generation entirely for those slots.
         """
         if self.executor is None:
             raise RuntimeError("Executor not initialized. Cannot run analysis.")
@@ -457,19 +475,36 @@ class AnalysisAgentV2:
         for analysis_idx in range(self.num_analyses):
             seeded_hypothesis, seeded = None, False
 
-            if seeded_hypotheses and analysis_idx < len(seeded_hypotheses):
+            # Prebuilt analysis takes priority — skip hypothesis generation entirely
+            if prebuilt_analyses and analysis_idx < len(prebuilt_analyses):
+                analysis = prebuilt_analyses[analysis_idx]
+                seeded = True
+                print(
+                    f"Using pre-built analysis plan for Analysis {analysis_idx + 1}: "
+                    f"{analysis.get('hypothesis', '')[:80]}..."
+                )
+            elif seeded_hypotheses and analysis_idx < len(seeded_hypotheses):
                 seeded_hypothesis = seeded_hypotheses[analysis_idx]
                 seeded = True
-
-            try:
-                # Phase 1: Idea Generation (hypothesis.py)
+                # Phase 1: Idea Generation from seed string
                 analysis = self.hypothesis_generator.generate_idea(
                     past_analyses, analysis_idx, seeded_hypothesis
                 )
                 print(
                     f"🚀 Generated Initial Analysis Plan for Analysis {analysis_idx + 1}"
                 )
+                self._save_analysis_plan(analysis, analysis_idx)
+            else:
+                # Phase 1: Idea Generation (hypothesis.py)
+                analysis = self.hypothesis_generator.generate_idea(
+                    past_analyses, analysis_idx, None
+                )
+                print(
+                    f"🚀 Generated Initial Analysis Plan for Analysis {analysis_idx + 1}"
+                )
+                self._save_analysis_plan(analysis, analysis_idx)
 
+            try:
                 # Phase 2: Idea Execution
                 past_analyses = self.executor.execute_idea(
                     analysis, past_analyses, analysis_idx, seeded=seeded
@@ -554,6 +589,7 @@ class AnalysisAgentV2:
                 analysis = self.hypothesis_generator.generate_idea(
                     past_analyses, analysis_idx, seeded_hypothesis
                 )
+                self._save_analysis_plan(analysis, analysis_idx)
 
                 print("\n" + "=" * 80)
                 print(f"HYPOTHESIS DEBUG: Analysis {analysis_idx + 1}")
