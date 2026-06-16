@@ -5,6 +5,7 @@ Guidelines for constructing the analyses:
     4. The annData is already loaded, DO NOT RELOAD IT
     5. You should determine the correct pipline entry point, before constructing the analysis plan you must determine which preprocessing steps have already been completed, DO NOT REPEAT THESE STEPS.
     6. If QC has already been complete as determined in guideline number 5 you should not plot QC figures and move on to the next step in the analysis.
+    7. You MUST plot your results and display the plots for each section
 
 You may use single-cell RNA-seq methods where they are relevant, select methods needed to answer the biological question and match the current processing state, available metatdata of the AnnData object, and cell types relevent to the biological background. Below is a selection of methods you could use, however you are also not limited only to these methods and this is NOT to be treated like a analysis template:
 {analyses_overview}
