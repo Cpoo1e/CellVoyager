@@ -12,7 +12,7 @@ def qc_summary(
     min_genes: int = 200,
     min_counts: int = 500,
     max_counts: int = 50000,
-    max_mito_pct: float = None,
+    max_mito_pct: float | None = None,
     min_cell_per_gene: int = 3,
 ) -> tuple[Any, dict]:
     """
@@ -40,6 +40,11 @@ def qc_summary(
 
     cells_before_filtering = adata.n_obs
     genes_before_filtering = adata.n_vars
+
+    filter_applied = False
+
+    cells_after_filtering = cells_before_filtering
+    genes_after_filtering = genes_before_filtering
 
     warnings = []
 
@@ -124,7 +129,6 @@ def qc_summary(
         results["overall"] = make_summary(adata.obs)
 
     # Filtering
-    filter_applied = False
 
     if apply_filters:
         sc.pp.filter_cells(adata, min_genes=min_genes)
