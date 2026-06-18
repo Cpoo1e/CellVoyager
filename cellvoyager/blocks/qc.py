@@ -46,11 +46,45 @@ def qc_summary(
     cells_after_filtering = cells_before_filtering
     genes_after_filtering = genes_before_filtering
 
-    warnings = []
+    warnings: list[str] = []
+
+    filter_log = {
+        "cells_before": cells_before_filtering,
+        "genes_before": genes_before_filtering,
+        "cells_after": cells_after_filtering,
+        "genes_after": genes_after_filtering,
+        "min_genes": min_genes,
+        "min_counts": min_counts,
+        "max_counts": max_counts,
+        "max_mito_pct": max_mito_pct,
+        "min_cells_per_gene": min_cell_per_gene,
+    }
+
+    processing_state = {
+        "shape": (adata.n_obs, adata.n_vars),
+        "layers": list(adata.layers.keys()),
+        "obsm": list(adata.obsm.keys()),
+        "varm": list(adata.varm.keys()),
+        "uns_selected": [k for k in ["log1p", "pca", "neighbors"] if k in adata.uns],
+        "raw_exists": adata.raw is not None,
+        "has_pca": "X_pca" in adata.obsm,
+        "has_pca_metadata": "pca" in adata.uns,
+        "has_neighbors": "neighbors" in adata.uns,
+        "leiden_columns": [c for c in adata.obs.columns if "leiden" in str(c).lower()],
+        "has_hvgs": "highly_variable" in adata.var.columns,
+        "had_mito_column_before_qc": "mt" in adata.var.columns,
+    }
+
+    if "highly_variable" in adata.var.columns:
+        processing_state["n_hvgs"] = int(adata.var["highly_variable"].sum())
+    else:
+        processing_state["n_hvgs"] = None
 
     # Annotate the mt genes in the AnnData obj
-    adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
+    if "mt" not in adata.var.columns:
+        adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
 
+    n_mt_genes = 0
     try:
         n_mt_genes = int(adata.var["mt"].sum())
         if n_mt_genes == 0:
@@ -61,25 +95,37 @@ def qc_summary(
     except Exception:
         warnings.append("Could not determine the number of mitochondrial genes.")
 
+    processing_state["has_mito_column_after_qc"] = "mt" in adata.var.columns
+    processing_state["n_mito_genes"] = n_mt_genes
+
     # Calculate QC metrics
     required_qc_metrics = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
     missing_metrics = [
         metric for metric in required_qc_metrics if metric not in adata.obs.columns
     ]
 
-    if missing_metrics and adata.var["mt"].any():
-        sc.pp.calculate_qc_metrics(
-            adata,
-            qc_vars=["mt"],
-            percent_top=None,
-            log1p=False,
-            inplace=True,
-        )
-
-    else:
-        warnings.append(
-            f"Missing QC metrics: {', '.join(missing_metrics)}. QC summary may be incomplete."
-        )
+    if missing_metrics:
+        if adata.var["mt"].any():
+            sc.pp.calculate_qc_metrics(
+                adata,
+                qc_vars=["mt"],
+                percent_top=None,
+                log1p=False,
+                inplace=True,
+            )
+        else:
+            warnings.append(
+                "QC metrics were missing, but no mitochondrial genes were detected. "
+                "Calculated standard QC metrics and set pct_counts_mt to 0.0."
+            )
+            sc.pp.calculate_qc_metrics(
+                adata,
+                qc_vars=[],
+                percent_top=None,
+                log1p=False,
+                inplace=True,
+            )
+            adata.obs["pct_counts_mt"] = 0.0
 
     missing_after = [
         metric for metric in required_qc_metrics if metric not in adata.obs.columns
@@ -89,7 +135,10 @@ def qc_summary(
             "status": "failed",
             "message": f"QC metrics calculation failed. Missing metrics: {', '.join(missing_after)}.",
             "warnings": warnings,
+            "processing_state": processing_state,
             "results": {},
+            "filter_applied": filter_applied,
+            "filter_log": filter_log,
         }
 
     # Generate QC summary
@@ -104,7 +153,7 @@ def qc_summary(
             "median_pct_mito": float(obs["pct_counts_mt"].median()),
         }
 
-    results = {}
+    results: dict[str, Any] = {}
 
     # Small funtion inside the list that only includes groupby columns that are actually present in adata.obs
     available_groupby = [col for col in groupby if col in adata.obs.columns]
@@ -153,6 +202,10 @@ def qc_summary(
 
         cells_after_filtering = adata.n_obs
         genes_after_filtering = adata.n_vars
+        filter_log["cells_after"] = cells_after_filtering
+        filter_log["genes_after"] = genes_after_filtering
+        filter_log["cells_removed"] = cells_before_filtering - cells_after_filtering
+        filter_log["genes_removed"] = genes_before_filtering - genes_after_filtering
 
     # Summary
     overall_summary = make_summary(adata.obs)
@@ -165,12 +218,15 @@ def qc_summary(
         f"Median genes per cell: {overall_summary['median_n_genes']:.2f}\n"
         f"Median counts per cell: {overall_summary['median_total_counts']:.2f}\n"
         f"Median mitochondrial percentage: {overall_summary['median_pct_mito']:.2f}\n"
+        f"Available objs in adata obs: {', '.join(adata.obs.columns)}\n"
     )
 
     if filter_applied:
         summary_text += (
             f"Cells after filtering: {cells_after_filtering}\n"
             f"Genes after filtering: {genes_after_filtering}\n"
+            f"Cells removed: {cells_before_filtering - cells_after_filtering}\n"
+            f"Genes removed: {genes_before_filtering - genes_after_filtering}\n"
         )
 
     else:
@@ -181,7 +237,9 @@ def qc_summary(
         "message": summary_text,
         "warnings": warnings,
         "results": results,
+        "processing_state": processing_state,
         "filter_applied": filter_applied,
+        "filter_log": filter_log,
     }
 
     return adata, result
