@@ -3,11 +3,11 @@ setlocal
 
 REM CellVoyager hypothesis-generation sweep
 
-set "REPEATS=1"
+set "REPEATS=3"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\processed_filtered.h5ad"
 set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\No_paper_background.txt"
-set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Hypothesis_short_Qwen3_final\processed"
+set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Analysis_sweep"
 
 cd /d "%ROOT%"
 
@@ -37,15 +37,15 @@ ollama run "%MODEL%" "Reply with exactly OK" >nul
 for /L %%R in (1,1,%REPEATS%) do (
     echo Running %NAME% repeat %%R...
     python .\CellVoyager\run_cellvoyager.py ^
-      --local-llm ^
-      --hypothesis-debug ^
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
-      --analysis-name "%NAME%_r%%R_short" ^
+      --analysis-name "%NAME%_r%%R" ^
       --model-name "ollama_chat/%MODEL%" ^
       --api-base-url "http://localhost:11434" ^
       --log-home "%LOGS%" ^
-      --log-prompts
+      --log-prompts ^
+      --execution-mode legacy ^
+      --from-analysis-json C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\BenchMarks\sonnet4_6_benchmark_shortPrompt_20260615_144856\sonnet4_6_benchmark_shortPrompt_analysis_1_plan.json
 )
 
 ollama stop "%MODEL%" >nul

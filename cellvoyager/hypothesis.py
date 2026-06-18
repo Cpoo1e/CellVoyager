@@ -111,6 +111,30 @@ class HypothesisGenerator:
         self.deepresearch_background = deepresearch_background
         self.log_prompts = log_prompts
         self.api_base_url = api_base_url
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.total_tokens = 0
+
+    def _record_token_usage(self, response, phase: str, call_id: str):
+        """Record token usage from LiteLLM response."""
+        usage = getattr(response, "usage", None)
+
+        output_tokens = int(getattr(usage, "completion_tokens", 0))
+        input_tokens = int(getattr(usage, "prompt_tokens", 0))
+        total_tokens = int(getattr(usage, "total_tokens", 0))
+
+        self.total_input_tokens += input_tokens
+        self.total_output_tokens += output_tokens
+        self.total_tokens += total_tokens
+
+        self.logger.log_response(
+            f"Token usage for call_id={call_id} [{phase}]:\n"
+            f"usage: {usage}\n"
+            f"Input tokens: {input_tokens}\n"
+            f"Output tokens: {output_tokens}\n"
+            f"Total tokens: {total_tokens}",
+            f"token_usage_{phase}_{call_id}",
+        )
 
     def _format_messages_for_log(self, messages: list) -> str:
         """Readable formatting for LLM chat messages."""
@@ -149,7 +173,10 @@ class HypothesisGenerator:
                 kwargs["format"] = AnalysisPlan.model_json_schema()
                 kwargs["timeout"] = 300.0
 
-            result = client.chat.completions.create(**kwargs)
+            result, raw_response = client.chat.completions.create_with_completion(
+                **kwargs
+            )
+            self._record_token_usage(raw_response, phase, call_id)
 
             output = result.model_dump()
 
@@ -186,12 +213,13 @@ class HypothesisGenerator:
                     messages=list(messages),
                     api_base=self.api_base_url,
                 )
-
+                self._record_token_usage(response, phase, call_id)
             else:
                 response = litellm.completion(
                     model=self.model_name,
                     messages=list(messages),
                 )
+                self._record_token_usage(response, phase, call_id)
 
             content = response.choices[0].message.content
 
@@ -430,6 +458,13 @@ class HypothesisGenerator:
                     f"revised_analysis_{step_name}",
                 )
 
+            self.logger.log_response(
+                f"Total Token Usage for Hypothesis Generation:\n"
+                f"Input tokens: {self.total_input_tokens}\n"
+                f"Output tokens: {self.total_output_tokens}\n"
+                f"Total tokens: {self.total_tokens}",
+            )
+
             return modified_analysis
         else:
             if analysis_idx is not None:
@@ -438,6 +473,13 @@ class HypothesisGenerator:
                     f"SKIPPING INITIAL SELF-CRITIQUE - Analysis {analysis_idx + 1}",
                     f"no_self_critique_{step_name}",
                 )
+
+            self.logger.log_response(
+                f"Total Token Usage for Hypothesis Generation:\n"
+                f"Input tokens: {self.total_input_tokens}\n"
+                f"Output tokens: {self.total_output_tokens}\n"
+                f"Total tokens: {self.total_tokens}",
+            )
 
             return analysis
 

@@ -21,18 +21,18 @@ from pathlib import Path
 from typing import Any
 
 import nbformat as nbf
+from jupyter_client import KernelManager
 from nbformat.v4 import (
     new_code_cell,
     new_markdown_cell,
     new_notebook,
     new_output,
 )
-from jupyter_client import KernelManager
-
 
 # -----------------------------------------------------------------------------
 # Small helpers
 # -----------------------------------------------------------------------------
+
 
 def strip_code_fences(text: str) -> str:
     if not text:
@@ -50,6 +50,7 @@ def now_str() -> str:
 # -----------------------------------------------------------------------------
 # Notebook + kernel state (owned by the MCP server)
 # -----------------------------------------------------------------------------
+
 
 class NotebookSession:
     def __init__(self, notebook_path: str):
@@ -118,9 +119,13 @@ class NotebookSession:
 
     def _require_index(self, index: int) -> None:
         if index < 0 or index >= len(self.nb.cells):
-            raise IndexError(f"Cell index {index} out of range (0..{len(self.nb.cells)-1})")
+            raise IndexError(
+                f"Cell index {index} out of range (0..{len(self.nb.cells) - 1})"
+            )
 
-    def insert_cell(self, index: int | None, cell_type: str, source: str) -> dict[str, Any]:
+    def insert_cell(
+        self, index: int | None, cell_type: str, source: str
+    ) -> dict[str, Any]:
         index = self._normalize_insert_index(index)
 
         if cell_type == "markdown":
@@ -166,12 +171,14 @@ class NotebookSession:
             self.nb = nbf.read(self.path, as_version=4)
         cells = []
         for i, cell in enumerate(self.nb.cells):
-            cells.append({
-                "index": i,
-                "cell_type": cell.cell_type,
-                "source_preview": self._trim(cell.source, 600),
-                "output_preview": self._cell_output_preview(cell, 1200),
-            })
+            cells.append(
+                {
+                    "index": i,
+                    "cell_type": cell.cell_type,
+                    "source_preview": self._trim(cell.source, 600),
+                    "output_preview": self._cell_output_preview(cell, 1200),
+                }
+            )
         return {
             "ok": True,
             "notebook_path": str(self.path),
@@ -204,10 +211,15 @@ class NotebookSession:
         # Signal to the GUI that this cell is executing
         running_path = self.path.parent / ".cellvoyager_running_cell"
         try:
-            running_path.write_text(json.dumps({
-                "cell_index": index,
-                "started_at": time.time(),
-            }), encoding="utf-8")
+            running_path.write_text(
+                json.dumps(
+                    {
+                        "cell_index": index,
+                        "started_at": time.time(),
+                    }
+                ),
+                encoding="utf-8",
+            )
         except Exception:
             pass
 
@@ -234,7 +246,9 @@ class NotebookSession:
             out["paused_by_user"] = True
         return out
 
-    def insert_execute_code_cell(self, index: int | None, source: str) -> dict[str, Any]:
+    def insert_execute_code_cell(
+        self, index: int | None, source: str
+    ) -> dict[str, Any]:
         inserted = self.insert_cell(index=index, cell_type="code", source=source)
         idx = inserted["cell_index"]
         executed = self.execute_cell(idx)
@@ -262,6 +276,7 @@ class NotebookSession:
         kill_path = self.path.parent / ".cellvoyager_kill_cell"
 
         import queue
+
         while True:
             try:
                 msg = self.kc.get_iopub_msg(timeout=2)
@@ -289,35 +304,43 @@ class NotebookSession:
                 execution_count = content.get("execution_count", execution_count)
 
             elif msg_type == "stream":
-                outputs.append(new_output(
-                    output_type="stream",
-                    name=content["name"],
-                    text=content["text"],
-                ))
+                outputs.append(
+                    new_output(
+                        output_type="stream",
+                        name=content["name"],
+                        text=content["text"],
+                    )
+                )
 
             elif msg_type == "display_data":
-                outputs.append(new_output(
-                    output_type="display_data",
-                    data=content["data"],
-                    metadata=content.get("metadata", {}),
-                ))
+                outputs.append(
+                    new_output(
+                        output_type="display_data",
+                        data=content["data"],
+                        metadata=content.get("metadata", {}),
+                    )
+                )
 
             elif msg_type == "execute_result":
                 execution_count = content.get("execution_count", execution_count)
-                outputs.append(new_output(
-                    output_type="execute_result",
-                    data=content["data"],
-                    metadata=content.get("metadata", {}),
-                    execution_count=execution_count,
-                ))
+                outputs.append(
+                    new_output(
+                        output_type="execute_result",
+                        data=content["data"],
+                        metadata=content.get("metadata", {}),
+                        execution_count=execution_count,
+                    )
+                )
 
             elif msg_type == "error":
-                outputs.append(new_output(
-                    output_type="error",
-                    ename=content["ename"],
-                    evalue=content["evalue"],
-                    traceback=content["traceback"],
-                ))
+                outputs.append(
+                    new_output(
+                        output_type="error",
+                        ename=content["ename"],
+                        evalue=content["evalue"],
+                        traceback=content["traceback"],
+                    )
+                )
                 error_text = "\n".join(content["traceback"][-8:])
 
             elif msg_type == "clear_output":
@@ -403,12 +426,15 @@ REGISTRY = SessionRegistry()
 # MCP server
 # -----------------------------------------------------------------------------
 
+
 def run_mcp_server() -> None:
     from mcp.server.fastmcp import FastMCP
 
     mcp = FastMCP("jupyter")
 
-    def _force_gui_pause_if_requested(session: NotebookSession | None) -> tuple[bool, str]:
+    def _force_gui_pause_if_requested(
+        session: NotebookSession | None,
+    ) -> tuple[bool, str]:
         """Server-side pause gate: honor GUI Stop even if the agent misses check_user_stop."""
         if os.environ.get("CELLVOYAGER_GUI_INTERACTIVE") != "1":
             return False, ""
@@ -443,10 +469,15 @@ def run_mcp_server() -> None:
                     idx = int(req.get("cell_index", -1))
                     if session.path.exists():
                         session.nb = nbf.read(session.path, as_version=4)
-                    if 0 <= idx < len(session.nb.cells) and session.nb.cells[idx].cell_type == "code":
+                    if (
+                        0 <= idx < len(session.nb.cells)
+                        and session.nb.cells[idx].cell_type == "code"
+                    ):
                         session.execute_cell(idx)
                 except Exception as e:
-                    sys.stderr.write(f"[CellVoyager] Forced-pause execute failed: {e}\n")
+                    sys.stderr.write(
+                        f"[CellVoyager] Forced-pause execute failed: {e}\n"
+                    )
 
             time.sleep(0.05)
 
@@ -476,11 +507,13 @@ def run_mcp_server() -> None:
             session.execute_cell(1)
             session.setup_executed = True
         # Insert initial analysis plan only after setup has finished executing.
-        if session.setup_executed and not bool(session.nb.metadata.get("cellvoyager_plan_inserted", False)):
+        if session.setup_executed and not bool(
+            session.nb.metadata.get("cellvoyager_plan_inserted", False)
+        ):
             plan = session.nb.metadata.get("cellvoyager_initial_plan")
             if isinstance(plan, list) and plan:
                 plan_md = "# Analysis Plan\n\n" + "\n".join(
-                    f"{i+1}. {step}" for i, step in enumerate(plan)
+                    f"{i + 1}. {step}" for i, step in enumerate(plan)
                 )
                 session.insert_cell(index=2, cell_type="markdown", source=plan_md)
             session.nb.metadata["cellvoyager_plan_inserted"] = True
@@ -603,7 +636,9 @@ def run_mcp_server() -> None:
         _FEEDBACK_CELL_MARKER = "## 📝 Your feedback"
         _FEEDBACK_INSTRUCTION = "*Type your message below. You can also edit any cells above. Save, then press Enter in the terminal.*"
         _GUI_MODE = os.environ.get("CELLVOYAGER_GUI_INTERACTIVE") == "1"
-        _INTERVENE_EVERY = max(1, int(os.environ.get("CELLVOYAGER_INTERVENE_EVERY", "1")))
+        _INTERVENE_EVERY = max(
+            1, int(os.environ.get("CELLVOYAGER_INTERVENE_EVERY", "1"))
+        )
 
         _SUMMARY_MAX_BULLETS = 5
 
@@ -630,9 +665,11 @@ def run_mcp_server() -> None:
             if anthropic_key:
                 try:
                     import anthropic
+
                     client = anthropic.Anthropic(api_key=anthropic_key)
                     resp = client.messages.create(
-                        model="claude-haiku-4-5-20251001", max_tokens=150,
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=150,
                         messages=[{"role": "user", "content": prompt}],
                     )
                     if resp.content:
@@ -643,9 +680,11 @@ def run_mcp_server() -> None:
             if openai_key:
                 try:
                     from openai import OpenAI
+
                     client = OpenAI(api_key=openai_key)
                     resp = client.chat.completions.create(
-                        model="gpt-4o-mini", max_tokens=150,
+                        model="gpt-4o-mini",
+                        max_tokens=150,
                         messages=[{"role": "user", "content": prompt}],
                     )
                     return (resp.choices[0].message.content or "").strip()
@@ -670,17 +709,23 @@ def run_mcp_server() -> None:
                 if not has_gui_request:
                     request_path.write_text(nb_path, encoding="utf-8")
                 agent_summary_path.unlink(missing_ok=True)
+
                 def _write_summary_bg():
                     try:
-                        agent_summary_path.write_text(_extract_agent_summary(session.nb), encoding="utf-8")
+                        agent_summary_path.write_text(
+                            _extract_agent_summary(session.nb), encoding="utf-8"
+                        )
                     except Exception:
                         pass
+
                 threading.Thread(target=_write_summary_bg, daemon=True).start()
                 if response_path.exists():
                     feedback = response_path.read_text(encoding="utf-8").strip()
                     response_path.unlink(missing_ok=True)
                     request_path.unlink(missing_ok=True)
-                    stop_request_path.unlink(missing_ok=True)  # Clear so agent doesn't pause again
+                    stop_request_path.unlink(
+                        missing_ok=True
+                    )  # Clear so agent doesn't pause again
                     if session.path.exists():
                         session.nb = nbf.read(session.path, as_version=4)
                     return {"ready": True, "user_feedback": feedback}
@@ -691,7 +736,9 @@ def run_mcp_server() -> None:
                 step_count = 0
                 try:
                     if step_count_path.exists():
-                        step_count = int(step_count_path.read_text(encoding="utf-8").strip() or "0")
+                        step_count = int(
+                            step_count_path.read_text(encoding="utf-8").strip() or "0"
+                        )
                 except (ValueError, OSError):
                     pass
                 step_count += 1
@@ -704,11 +751,15 @@ def run_mcp_server() -> None:
             request_path.write_text(nb_path, encoding="utf-8")
             # Clear stale summary and generate new one in background
             agent_summary_path.unlink(missing_ok=True)
+
             def _write_summary():
                 try:
-                    agent_summary_path.write_text(_extract_agent_summary(session.nb), encoding="utf-8")
+                    agent_summary_path.write_text(
+                        _extract_agent_summary(session.nb), encoding="utf-8"
+                    )
                 except Exception:
                     pass
+
             threading.Thread(target=_write_summary, daemon=True).start()
             _poll_interval = 0.05  # 50ms for responsive execute handling
             _iter_limit = None  # Wait indefinitely for user feedback in both modes
@@ -723,20 +774,31 @@ def run_mcp_server() -> None:
                 # GUI mode: process execute requests (run a cell, save, continue waiting)
                 if _GUI_MODE and execute_request_path.exists():
                     try:
-                        req = json.loads(execute_request_path.read_text(encoding="utf-8"))
+                        req = json.loads(
+                            execute_request_path.read_text(encoding="utf-8")
+                        )
                         idx = int(req.get("cell_index", -1))
-                        session.nb = nbf.read(session.path, as_version=4)  # Reload user edits from disk
-                        if 0 <= idx < len(session.nb.cells) and session.nb.cells[idx].cell_type == "code":
+                        session.nb = nbf.read(
+                            session.path, as_version=4
+                        )  # Reload user edits from disk
+                        if (
+                            0 <= idx < len(session.nb.cells)
+                            and session.nb.cells[idx].cell_type == "code"
+                        ):
                             session.execute_cell(idx)
                         execute_request_path.unlink(missing_ok=True)
                     except Exception as e:
                         execute_request_path.unlink(missing_ok=True)
                         sys.stderr.write(f"[CellVoyager] Execute request failed: {e}\n")
                 if response_path.exists():
-                    response_feedback = response_path.read_text(encoding="utf-8").strip()
+                    response_feedback = response_path.read_text(
+                        encoding="utf-8"
+                    ).strip()
                     response_path.unlink(missing_ok=True)
                     if _GUI_MODE:
-                        stop_request_path.unlink(missing_ok=True)  # Clear so agent doesn't pause again
+                        stop_request_path.unlink(
+                            missing_ok=True
+                        )  # Clear so agent doesn't pause again
                         # GUI mode: reload notebook from disk so agent gets user edits
                         if session.path.exists():
                             session.nb = nbf.read(session.path, as_version=4)
@@ -744,7 +806,10 @@ def run_mcp_server() -> None:
                     # Terminal mode: feedback comes directly from terminal
                     return {"ready": True, "user_feedback": response_feedback}
                 time.sleep(_poll_interval)
-            return {"ready": True, "user_feedback": "(timeout)" if not _GUI_MODE else ""}
+            return {
+                "ready": True,
+                "user_feedback": "(timeout)" if not _GUI_MODE else "",
+            }
 
     mcp.run(transport="stdio")
 
@@ -791,10 +856,19 @@ class _InteractiveWatcher:
                     nb_path = "(unknown)"
                 self.request_path.unlink(missing_ok=True)
                 try:
-                    print("\n=== PAUSE: Agent is waiting for your feedback ===", flush=True)
+                    print(
+                        "\n=== PAUSE: Agent is waiting for your feedback ===",
+                        flush=True,
+                    )
                     print(f"Notebook: {nb_path}", flush=True)
-                    print("You can edit the notebook directly before continuing.", flush=True)
-                    print("Enter feedback below (or press Enter to continue without feedback):", flush=True)
+                    print(
+                        "You can edit the notebook directly before continuing.",
+                        flush=True,
+                    )
+                    print(
+                        "Enter feedback below (or press Enter to continue without feedback):",
+                        flush=True,
+                    )
                     if Path("/dev/tty").exists():
                         tty = open("/dev/tty", "r")
                         print("> ", end="", flush=True)
@@ -818,6 +892,7 @@ def _start_interactive_watcher(output_dir: Path) -> "_InteractiveWatcher":
 # Simple file logger
 # -----------------------------------------------------------------------------
 
+
 class FileLogger:
     def __init__(self, log_path: str):
         self.log_path = Path(log_path)
@@ -834,6 +909,7 @@ class FileLogger:
 # -----------------------------------------------------------------------------
 # Claude runner
 # -----------------------------------------------------------------------------
+
 
 class CellVoyagerClaudeRunner:
     """
@@ -877,7 +953,9 @@ class CellVoyagerClaudeRunner:
         self.interactive_mode = interactive_mode
         self.intervene_every = max(1, int(intervene_every))
 
-        self.anthropic_api_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+        self.anthropic_api_key = anthropic_api_key or os.environ.get(
+            "ANTHROPIC_API_KEY"
+        )
         if not self.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY is required")
         self.execution_model = execution_model or None
@@ -885,13 +963,17 @@ class CellVoyagerClaudeRunner:
     def _server_command(self) -> list[str]:
         return [sys.executable, str(Path(__file__).resolve()), "mcp-server"]
 
-    def _write_initial_notebook(self, analysis: dict[str, Any], analysis_idx: int) -> Path:
+    def _write_initial_notebook(
+        self, analysis: dict[str, Any], analysis_idx: int
+    ) -> Path:
         nb = new_notebook()
 
         hypothesis = analysis.get("hypothesis", "No hypothesis provided")
         plan = analysis.get("analysis_plan", [])
 
-        nb.cells.append(new_markdown_cell(f"# Analysis\n\n**Hypothesis**: {hypothesis}"))
+        nb.cells.append(
+            new_markdown_cell(f"# Analysis\n\n**Hypothesis**: {hypothesis}")
+        )
 
         setup_code = f"""import scanpy as sc
 import numpy as np
@@ -908,7 +990,9 @@ print(f"Loaded: {{adata.n_obs}} cells x {{adata.n_vars}} genes")
         nb.metadata["cellvoyager_initial_plan"] = plan
         nb.metadata["cellvoyager_plan_inserted"] = False
 
-        notebook_path = self.output_dir / f"{self.analysis_name}_analysis_{analysis_idx + 1}.ipynb"
+        notebook_path = (
+            self.output_dir / f"{self.analysis_name}_analysis_{analysis_idx + 1}.ipynb"
+        )
         with open(notebook_path, "w", encoding="utf-8") as f:
             nbf.write(nb, f)
 
@@ -919,7 +1003,7 @@ print(f"Loaded: {{adata.n_obs}} cells x {{adata.n_vars}} genes")
         plan = analysis.get("analysis_plan", [])
         first_step_code = strip_code_fences(analysis.get("first_step_code", ""))
 
-        plan_text = "\n".join(f"{i+1}. {step}" for i, step in enumerate(plan))
+        plan_text = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(plan))
 
         interactive_block = ""
         if self.interactive_mode:
@@ -1021,7 +1105,7 @@ coding guidelines: {self.coding_guidelines[:3000]}
 """.strip()
 
     def _log_stream_item(self, item: Any) -> None:
-        """ Logs:
+        """Logs:
         - partial streamed text
         - tool starts
         - final assistant text
@@ -1035,10 +1119,13 @@ coding guidelines: {self.coding_guidelines[:3000]}
             if ev_type == "content_block_start":
                 block = event.get("content_block", {})
                 if block.get("type") == "tool_use":
-                    self.logger.log_json("tool_start", {
-                        "name": block.get("name"),
-                        "input": block.get("input"),
-                    })
+                    self.logger.log_json(
+                        "tool_start",
+                        {
+                            "name": block.get("name"),
+                            "input": block.get("input"),
+                        },
+                    )
 
             elif ev_type == "content_block_delta":
                 delta = event.get("delta", {})
@@ -1069,10 +1156,13 @@ coding guidelines: {self.coding_guidelines[:3000]}
                 name = getattr(block, "name", None)
                 tool_input = getattr(block, "input", None)
                 if name:
-                    self.logger.log_json("assistant_tool_block", {
-                        "name": name,
-                        "input": tool_input,
-                    })
+                    self.logger.log_json(
+                        "assistant_tool_block",
+                        {
+                            "name": name,
+                            "input": tool_input,
+                        },
+                    )
 
         result = getattr(item, "result", None)
         if result:
@@ -1082,10 +1172,17 @@ coding guidelines: {self.coding_guidelines[:3000]}
         if is_error:
             self.logger.log("error", "Agent returned an error flag")
 
-    def _build_resume_prompt(self, notebook_path: Path, user_feedback: str | None = None, extend: bool = False) -> str:
+    def _build_resume_prompt(
+        self,
+        notebook_path: Path,
+        user_feedback: str | None = None,
+        extend: bool = False,
+    ) -> str:
         """Prompt for resume mode: execute all code cells to restore kernel state, then pause (or extend)."""
         if extend:
-            feedback_line = f"\n\nUser feedback:\n{user_feedback}" if user_feedback else ""
+            feedback_line = (
+                f"\n\nUser feedback:\n{user_feedback}" if user_feedback else ""
+            )
             return f"""
 You are EXTENDING a completed single-cell analysis with additional steps. The notebook already exists.
 
@@ -1103,7 +1200,8 @@ CRITICAL: You must add new cells and new analyses. Only append (insert_cell with
 """.strip()
         feedback_section = (
             f"\n\nThe user has provided the following feedback to guide your continuation:\n{user_feedback}"
-            if user_feedback else ""
+            if user_feedback
+            else ""
         )
         return f"""
 You are RESUMING a completed single-cell analysis. The notebook already exists with all cells.
@@ -1157,11 +1255,14 @@ coding guidelines: {self.coding_guidelines[:3000]}{feedback_section}
         """
         Returns the notebook path.
         """
-        from claude_agent_sdk import query, ClaudeAgentOptions
+        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
         notebook_path = self._write_initial_notebook(analysis, analysis_idx)
         prompt = self._build_prompt(analysis, notebook_path)
 
-        self.logger.log("analysis_start", f"analysis_idx={analysis_idx} notebook={notebook_path}")
+        self.logger.log(
+            "analysis_start", f"analysis_idx={analysis_idx} notebook={notebook_path}"
+        )
         self.logger.log("prompt", prompt)
 
         os.environ["ANTHROPIC_API_KEY"] = self.anthropic_api_key
@@ -1205,11 +1306,16 @@ coding guidelines: {self.coding_guidelines[:3000]}{feedback_section}
         )
 
         interactive_watcher = None
-        if self.interactive_mode and os.environ.get("CELLVOYAGER_GUI_INTERACTIVE") != "1":
+        if (
+            self.interactive_mode
+            and os.environ.get("CELLVOYAGER_GUI_INTERACTIVE") != "1"
+        ):
             # Terminal-based watcher only when not running from GUI
             interactive_watcher = _start_interactive_watcher(self.output_dir)
 
-        async def _run() -> None:
+        async def _run() -> dict[str, Any] | None:
+            final_result = None
+
             async def prompt_gen():
                 yield {
                     "type": "user",
@@ -1222,13 +1328,60 @@ coding guidelines: {self.coding_guidelines[:3000]}{feedback_section}
             async for item in query(prompt=prompt_gen(), options=options):
                 self._log_stream_item(item)
 
+                # ResultMessage contains cumulative usage for this query.
+                if isinstance(item, ResultMessage):
+                    final_result = {
+                        "usage": item.usage or {},
+                        "total_cost_usd": item.total_cost_usd,
+                        "num_turns": item.num_turns,
+                        "model_usage": item.model_usage or {},
+                    }
+
+            return final_result
+
+        usage_result = None
+
         try:
-            asyncio.run(_run())
+            usage_result = asyncio.run(_run())
         finally:
             if interactive_watcher is not None:
                 interactive_watcher.stop()
 
         self.logger.log("analysis_complete", str(notebook_path))
+
+        # Keep this after analysis_complete so it appears at the end of the log.
+        if usage_result is not None:
+            usage = usage_result["usage"]
+
+            input_tokens = int(usage.get("input_tokens", 0) or 0)
+            cache_creation_tokens = int(
+                usage.get("cache_creation_input_tokens", 0) or 0
+            )
+            cache_read_tokens = int(usage.get("cache_read_input_tokens", 0) or 0)
+            output_tokens = int(usage.get("output_tokens", 0) or 0)
+
+            total_processed_tokens = (
+                input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens
+            )
+
+            self.logger.log_json(
+                "TOTAL_USAGE",
+                {
+                    "model": self.execution_model or "default",
+                    "input_tokens": input_tokens,
+                    "cache_creation_input_tokens": cache_creation_tokens,
+                    "cache_read_input_tokens": cache_read_tokens,
+                    "output_tokens": output_tokens,
+                    "total_processed_tokens": total_processed_tokens,
+                    "total_cost_usd": usage_result["total_cost_usd"],
+                    "num_turns": usage_result["num_turns"],
+                },
+            )
+        else:
+            self.logger.log(
+                "TOTAL_USAGE",
+                "No ResultMessage usage information was returned.",
+            )
         return str(notebook_path)
 
     def inter_analysis_pause(self, notebook_path: str, analysis_idx: int) -> str:
@@ -1280,11 +1433,27 @@ class ClaudeJupyterExecutor(CellVoyagerClaudeRunner):
     execute_idea to return past_analyses string instead of notebook path.
     """
 
-    def __init__(self, *, logger, output_dir, h5ad_path, adata_summary, paper_summary,
-                 coding_guidelines, analysis_name, anthropic_api_key,
-                 max_iterations=8, max_turns=60, interactive_mode=False, intervene_every=1,
-                 execution_model=None, **kwargs):
-        log_file = getattr(logger, "log_file", str(Path(output_dir) / "claude_execution.log"))
+    def __init__(
+        self,
+        *,
+        logger,
+        output_dir,
+        h5ad_path,
+        adata_summary,
+        paper_summary,
+        coding_guidelines,
+        analysis_name,
+        anthropic_api_key,
+        max_iterations=8,
+        max_turns=60,
+        interactive_mode=False,
+        intervene_every=1,
+        execution_model=None,
+        **kwargs,
+    ):
+        log_file = getattr(
+            logger, "log_file", str(Path(output_dir) / "claude_execution.log")
+        )
         super().__init__(
             output_dir=output_dir,
             h5ad_path=h5ad_path,
@@ -1301,8 +1470,13 @@ class ClaudeJupyterExecutor(CellVoyagerClaudeRunner):
             execution_model=execution_model,
         )
 
-    def execute_idea(self, analysis: dict[str, Any], past_analyses: str = "",
-                    analysis_idx: int = 0, seeded: bool = False) -> str:
+    def execute_idea(
+        self,
+        analysis: dict[str, Any],
+        past_analyses: str = "",
+        analysis_idx: int = 0,
+        seeded: bool = False,
+    ) -> str:
         """Returns updated past_analyses string for agent_v2 compatibility."""
         notebook_path = super().execute_idea(analysis, analysis_idx)
         # Build a rich summary so the next analysis can be distinct
@@ -1315,9 +1489,17 @@ class ClaudeJupyterExecutor(CellVoyagerClaudeRunner):
             nb = nbf.read(notebook_path, as_version=4)
             for cell in reversed(nb.cells):
                 if cell.cell_type == "markdown":
-                    src = cell.source if isinstance(cell.source, str) else "\n".join(cell.source)
+                    src = (
+                        cell.source
+                        if isinstance(cell.source, str)
+                        else "\n".join(cell.source)
+                    )
                     first_line = src.strip().split("\n")[0].lower()
-                    if "summary" in first_line or "finding" in first_line or "conclusion" in first_line:
+                    if (
+                        "summary" in first_line
+                        or "finding" in first_line
+                        or "conclusion" in first_line
+                    ):
                         findings = src.strip()[:500]
                         break
         except Exception:
@@ -1327,11 +1509,20 @@ class ClaudeJupyterExecutor(CellVoyagerClaudeRunner):
             summary += f"  Key findings:\n  {findings}\n"
         return f"{past_analyses}{summary}\n"
 
-    def resume_from_notebook(self, notebook_path: str, analysis_idx: int = 0, user_feedback: str | None = None, extend: bool = False) -> None:
+    def resume_from_notebook(
+        self,
+        notebook_path: str,
+        analysis_idx: int = 0,
+        user_feedback: str | None = None,
+        extend: bool = False,
+    ) -> None:
         """Resume a completed analysis: restore kernel state by executing cells, then pause or extend."""
-        from claude_agent_sdk import query, ClaudeAgentOptions
+        from claude_agent_sdk import ClaudeAgentOptions, query
+
         nb_path = Path(notebook_path).resolve()
-        prompt = self._build_resume_prompt(nb_path, user_feedback=user_feedback, extend=extend)
+        prompt = self._build_resume_prompt(
+            nb_path, user_feedback=user_feedback, extend=extend
+        )
 
         print("Agent running (streaming output below)...", flush=True)
         self.logger.log("resume_start", str(nb_path))
@@ -1384,6 +1575,7 @@ class ClaudeJupyterExecutor(CellVoyagerClaudeRunner):
 
         asyncio.run(_run())
         self.logger.log("resume_complete", str(nb_path))
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "mcp-server":

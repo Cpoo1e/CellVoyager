@@ -70,6 +70,31 @@ class IdeaExecutor:
         self.code_memory_size = 5
         self.kernel_manager = None
         self.kernel_client = None
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.total_tokens = 0
+
+    def _record_token_usage(self, response, phase: str, call_id: str):
+        """Record token usage from LiteLLM response."""
+        usage = getattr(response, "usage", None)
+        print(usage)
+
+        output_tokens = int(getattr(usage, "completion_tokens", 0))
+        input_tokens = int(getattr(usage, "prompt_tokens", 0))
+        total_tokens = int(getattr(usage, "total_tokens", 0))
+
+        self.total_input_tokens += input_tokens
+        self.total_output_tokens += output_tokens
+        self.total_tokens += total_tokens
+
+        self.logger.log_response(
+            f"Token usage for call_id={call_id} [{phase}]:\n"
+            f"usage: {usage}\n"
+            f"Input tokens: {input_tokens}\n"
+            f"Output tokens: {output_tokens}\n"
+            f"Total tokens: {total_tokens}",
+            f"token_usage_{phase}_{call_id}",
+        )
 
     def update_code_memory(self, notebook_cells):
         """Update the code memory with the latest code cells from the notebook"""
@@ -157,6 +182,11 @@ class IdeaExecutor:
                     response_format={"type": "json_object"},
                 )
                 result = response.choices[0].message.content
+                self._record_token_usage(
+                    response,
+                    phase="generate_next_step",
+                    call_id=f"attempt_{attempt + 1}",
+                )
 
                 if result is None:
                     print(
@@ -331,6 +361,9 @@ class IdeaExecutor:
                 {"role": "user", "content": prompt},
             ],
         )
+        self._record_token_usage(
+            response, phase="fix_code", call_id=f"attempt_{fix_attempt}"
+        )
         fixed_code = response.choices[0].message.content
 
         return fixed_code
@@ -355,7 +388,9 @@ class IdeaExecutor:
                 {"role": "user", "content": prompt},
             ],
         )
-
+        self._record_token_usage(
+            response, phase="generate_code_description", call_id="code_description"
+        )
         return response.choices[0].message.content.strip()
 
     def interpret_results(
@@ -434,6 +469,9 @@ class IdeaExecutor:
                         {"role": "user", "content": user_content},
                     ],
                 )
+                self._record_token_usage(
+                    response, phase="interpret_results", call_id="vlm_interpretation"
+                )
                 feedback = response.choices[0].message.content
             finally:
                 image_outputs.clear()
@@ -451,6 +489,9 @@ class IdeaExecutor:
                     },
                     {"role": "user", "content": prompt},
                 ],
+            )
+            self._record_token_usage(
+                response, phase="interpret_results", call_id="text_interpretation"
             )
             feedback = response.choices[0].message.content
 
@@ -512,9 +553,13 @@ class IdeaExecutor:
 
         while True:
             try:
-                msg = self.kernel_client.get_iopub_msg(timeout=300)
+                msg = self.kernel_client.get_iopub_msg(timeout=20000)
             except Exception:
-                break
+                try:
+                    self.kernel_manager.interrupt_kernel()
+                except Exception:
+                    pass
+                return False, "Cell timed out before producing output", nb
 
             msg_type = msg["msg_type"]
             content = msg["content"]
@@ -917,6 +962,10 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
         self.logger.log_response(
             f"ANALYSIS {analysis_idx + 1} COMPLETED - Notebook saved to: {notebook_path}",
             "analysis_complete",
+        )
+
+        self.logger.log_response(
+            f"Total token usage for Analysis {analysis_idx + 1}: Input Tokens: {self.total_input_tokens}, Output Tokens: {self.total_output_tokens}, Total Tokens: {self.total_tokens}",
         )
 
         self.stop_persistent_kernel()
