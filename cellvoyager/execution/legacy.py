@@ -553,7 +553,7 @@ class IdeaExecutor:
 
         while True:
             try:
-                msg = self.kernel_client.get_iopub_msg(timeout=900)
+                msg = self.kernel_client.get_iopub_msg(timeout=20000)
             except Exception:
                 try:
                     self.kernel_manager.interrupt_kernel()

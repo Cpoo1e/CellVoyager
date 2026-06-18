@@ -1,20 +1,22 @@
 @echo off
 setlocal
 
-REM CellVoyager hypothesis-generation sweep
+REM CellVoyager analysis-generation sweep
 
-set "REPEATS=3"
+set "REPEATS=1"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
-set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\processed_filtered.h5ad"
-set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\No_paper_background.txt"
+set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\60k_cells_filtered.h5ad"
+set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_Processed_60k.txt"
 set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Analysis_sweep"
+set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\60kHypothesis_analysis_1_plan.json"
+set "output_dir=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests"
 
 cd /d "%ROOT%"
 
 REM -------- Local models --------
-@REM call :RUN_LOCAL "gemma3:4b" "gemma3_4b"
-@REM call :RUN_LOCAL "llama3.1:8b" "llama31_8b"
-@REM call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
+call :RUN_LOCAL "gemma3:4b" "gemma3_4b"
+call :RUN_LOCAL "llama3.1:8b" "llama31_8b"
+call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
 call :RUN_LOCAL "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507"
 
 REM -------- Cloud models --------
@@ -39,13 +41,17 @@ for /L %%R in (1,1,%REPEATS%) do (
     python .\CellVoyager\run_cellvoyager.py ^
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
-      --analysis-name "%NAME%_r%%R" ^
+      --from-analysis-json "%ANALYSIS_JSON%" ^
+      --output-dir "%output_dir%" ^
+      --analysis-name "%NAME%_r%%R_60k_no_critique" ^
       --model-name "ollama_chat/%MODEL%" ^
       --api-base-url "http://localhost:11434" ^
       --log-home "%LOGS%" ^
-      --log-prompts ^
       --execution-mode legacy ^
-      --from-analysis-json C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\BenchMarks\sonnet4_6_benchmark_shortPrompt_20260615_144856\sonnet4_6_benchmark_shortPrompt_analysis_1_plan.json
+      --no-vlm ^
+      --log-prompts ^
+      --no-self-critique
+
 )
 
 ollama stop "%MODEL%" >nul
@@ -59,12 +65,15 @@ set "NAME=%~2"
 for /L %%R in (1,1,%REPEATS%) do (
     echo Running %NAME% repeat %%R...
     python .\CellVoyager\run_cellvoyager.py ^
-      --hypothesis-debug ^
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
-      --analysis-name "%NAME%_r%%R" ^
+      --from-analysis-json "%ANALYSIS_JSON%" ^
+      --output-dir "%output_dir%" ^
+      --analysis-name "%NAME%_r%%R_60k" ^
       --model-name "%MODEL%" ^
       --log-home "%LOGS%" ^
+      --execution-mode legacy ^
+      --no-vlm ^
       --log-prompts
 )
 
