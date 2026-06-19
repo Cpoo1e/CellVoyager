@@ -612,6 +612,179 @@ def run_mcp_server() -> None:
         session.restart_kernel()
         return {"ok": True, "notebook_path": str(session.path)}
 
+    @mcp.tool()
+    def run_qc_summary_template(
+        step_number: int,
+        reason: str = "",
+        groupby: list[str] | None = None,
+        apply_filters: bool = False,
+        apply_normalization: bool = False,
+        apply_log1p: bool = False,
+        apply_scaling: bool = False,
+        min_genes: int = 200,
+        min_counts: int = 500,
+        max_counts: int = 50000,
+        max_mito_pct: float | None = None,
+        min_cell_per_gene: int = 3,
+    ) -> dict[str, Any]:
+        """
+        Run the predefined CellVoyager QC summary/preprocessing template.
+
+        Use this instead of writing custom code when the step requires standard
+        QC metrics, grouped QC summaries, optional filtering, normalization,
+        log1p transformation, or scaling.
+        """
+
+        session = REGISTRY.require_current()
+
+        paused_by_user, user_feedback = _force_gui_pause_if_requested(session)
+        if paused_by_user:
+            return _paused_ack(user_feedback)
+
+        if groupby is None:
+            groupby = []
+
+        result_key = f"qc_summary_step_{step_number}_{int(time.time())}"
+        result_path = (
+            session.path.parent / "cellvoyager_tool_results" / f"{result_key}.json"
+        )
+
+        source = f"""# CellVoyager template call: QC summary / preprocessing
+qc_result = cv_run_qc_summary(
+    key={result_key!r},
+    groupby={groupby!r},
+    apply_filters={apply_filters!r},
+    apply_normalization={apply_normalization!r},
+    apply_log1p={apply_log1p!r},
+    apply_scaling={apply_scaling!r},
+    min_genes={min_genes!r},
+    min_counts={min_counts!r},
+    max_counts={max_counts!r},
+    max_mito_pct={max_mito_pct!r},
+    min_cell_per_gene={min_cell_per_gene!r},
+)
+"""
+
+        executed = session.insert_execute_code_cell(index=None, source=source)
+
+        if not executed.get("ok"):
+            error = executed.get("error", "Unknown error")
+
+            summary_md = f"""## Step {step_number} — QC template failed
+
+The predefined QC summary template was selected because: {reason}
+
+The tool failed, so the agent should either fix the issue or continue with custom code.
+
+```text
+{error}
+```
+"""
+
+            session.insert_cell(
+                index=None,
+                cell_type="markdown",
+                source=summary_md,
+            )
+
+            return {
+                "ok": False,
+                "tool": "run_qc_summary_template",
+                "result_key": result_key,
+                "error": error,
+            }
+
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except Exception:
+            result = {
+                "status": "unknown",
+                "message": executed.get("output_preview", "")[:1000],
+                "warnings": ["Could not read structured result JSON."],
+                "filter_log": {},
+                "preprocessing_log": {},
+                "processing_state": {},
+                "steps_run": [],
+                "steps_skipped": [],
+            }
+
+        filter_log = result.get("filter_log", {})
+        preprocessing_log = result.get("preprocessing_log", {})
+        processing_state = result.get("processing_state", {})
+        warnings_list = result.get("warnings", [])
+        steps_run = result.get("steps_run", [])
+        steps_skipped = result.get("steps_skipped", [])
+
+        warning_text = ""
+        if warnings_list:
+            warning_text = "\n\n**Warnings:**\n" + "\n".join(
+                f"- {warning}" for warning in warnings_list
+            )
+
+        summary_md = f"""## Step {step_number} — Tool summary: QC summary template
+
+The predefined QC summary/preprocessing template was used instead of writing new custom code.
+
+**Reason selected:** {reason}
+
+**Tool status:** `{result.get("status", "unknown")}`
+
+| Metric | Value |
+|---|---:|
+| Cells before | {filter_log.get("cells_before", "NA")} |
+| Cells after | {filter_log.get("cells_after", "NA")} |
+| Genes before | {filter_log.get("genes_before", "NA")} |
+| Genes after | {filter_log.get("genes_after", "NA")} |
+| Filtering applied | {result.get("filter_applied", "NA")} |
+| Mitochondrial genes detected | {processing_state.get("n_mito_genes", "NA")} |
+| Normalization applied | {preprocessing_log.get("normalization_applied", "NA")} |
+| Log1p applied | {preprocessing_log.get("log1p_applied", "NA")} |
+| Scaling applied | {preprocessing_log.get("scaling_applied", "NA")} |
+
+**Steps run:** {", ".join(steps_run) if steps_run else "None"}  
+**Steps skipped:** {", ".join(steps_skipped) if steps_skipped else "None"}
+
+{warning_text}
+
+The full result is stored for later steps in:
+
+```python
+cv_tool_results["{result_key}"]
+adata.uns["cellvoyager_tool_results"]["{result_key}"]
+```
+
+A JSON copy was saved to:
+
+```text
+{result_path}
+```
+
+Later steps should use the current live `adata` object.
+"""
+
+        session.insert_cell(
+            index=None,
+            cell_type="markdown",
+            source=summary_md,
+        )
+
+        return {
+            "ok": True,
+            "tool": "run_qc_summary_template",
+            "result_key": result_key,
+            "summary": result.get("message", "")[:1000],
+            "stored_result_path": str(result_path),
+            "compact_result": {
+                "status": result.get("status"),
+                "warnings": warnings_list,
+                "filter_applied": result.get("filter_applied"),
+                "filter_log": filter_log,
+                "preprocessing_log": preprocessing_log,
+                "steps_run": steps_run,
+                "steps_skipped": steps_skipped,
+            },
+        }
+
     if os.environ.get("CELLVOYAGER_INTERACTIVE_MODE") == "1":
         output_dir = Path(os.environ.get("CELLVOYAGER_INTERACTIVE_OUTPUT_DIR", "."))
         request_path = output_dir / _PAUSE_REQUEST_FILE
@@ -975,15 +1148,62 @@ class CellVoyagerClaudeRunner:
             new_markdown_cell(f"# Analysis\n\n**Hypothesis**: {hypothesis}")
         )
 
+        project_root = Path(__file__).parent.resolve()
+
         setup_code = f"""import scanpy as sc
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import json
+from pathlib import Path
+import sys
+
+project_root = Path(r'''{project_root}''')
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from tools.qc import qc_summary
 
 print("Loading data...")
 adata = sc.read_h5ad(r'''{self.h5ad_path}''')
-print(f"Loaded: {{adata.n_obs}} cells x {{adata.n_vars}} genes")
+print("Loaded:", adata.n_obs, "cells x", adata.n_vars, "genes")
+
+cv_tool_results = {{}}
+
+def cv_save_tool_result(key, result):
+    cv_tool_results[key] = result
+
+    if "cellvoyager_tool_results" not in adata.uns:
+        adata.uns["cellvoyager_tool_results"] = {{}}
+
+    adata.uns["cellvoyager_tool_results"][key] = result
+
+    result_dir = Path("cellvoyager_tool_results")
+    result_dir.mkdir(exist_ok=True)
+
+    result_path = result_dir / (key + ".json")
+    result_path.write_text(
+        json.dumps(result, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+    return result_path
+
+
+def cv_run_qc_summary(key, **kwargs):
+    global adata
+
+    adata, result = qc_summary(
+        adata=adata,
+        **kwargs,
+    )
+
+    result_path = cv_save_tool_result(key, result)
+
+    print(f"QC summary completed.")
+
+    return result
 """
         nb.cells.append(new_code_cell(setup_code))
         # Defer rendering the plan cell until setup finishes so the UI order is clear.
@@ -1291,6 +1511,7 @@ coding guidelines: {self.coding_guidelines[:3000]}{feedback_section}
             "mcp__jupyter__insert_execute_code_cell",
             "mcp__jupyter__restart_kernel",
             "mcp__jupyter__check_user_stop",
+            "mcp__jupyter__run_qc_summary_template",
         ]
         if self.interactive_mode:
             allowed_tools.append("mcp__jupyter__pause_for_user_review")
@@ -1554,6 +1775,7 @@ class ClaudeJupyterExecutor(CellVoyagerClaudeRunner):
             "mcp__jupyter__restart_kernel",
             "mcp__jupyter__check_user_stop",
             "mcp__jupyter__pause_for_user_review",
+            "mcp__jupyter__run_qc_summary_template",
         ]
 
         options = ClaudeAgentOptions(

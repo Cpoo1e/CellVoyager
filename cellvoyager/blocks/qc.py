@@ -9,6 +9,9 @@ def qc_summary(
     adata: Any,
     groupby: list[str] | None = None,
     apply_filters: bool = False,
+    apply_normalization: bool = False,
+    apply_log1p: bool = False,
+    apply_scaling: bool = False,
     min_genes: int = 200,
     min_counts: int = 500,
     max_counts: int = 50000,
@@ -59,6 +62,21 @@ def qc_summary(
         "max_mito_pct": max_mito_pct,
         "min_cells_per_gene": min_cell_per_gene,
     }
+
+    preprocessing_log = {
+        "normalization_requested": apply_normalization,
+        "log1p_requested": apply_log1p,
+        "scaling_requested": apply_scaling,
+        "normalization_applied": False,
+        "log1p_applied": False,
+        "scaling_applied": False,
+        "normalization_layer": None,
+        "log1p_layer": None,
+        "scaled_layer": None,
+    }
+
+    steps_run: list[str] = []
+    steps_skipped: list[str] = []
 
     processing_state = {
         "shape": (adata.n_obs, adata.n_vars),
@@ -207,6 +225,93 @@ def qc_summary(
         filter_log["cells_removed"] = cells_before_filtering - cells_after_filtering
         filter_log["genes_removed"] = genes_before_filtering - genes_after_filtering
 
+    has_normalization = "X_normalized" in adata.layers
+    if apply_normalization and not has_normalization:
+        adata.layers["X_normalized"] = adata.layers["counts"].copy()
+
+        sc.pp.normalize_total(
+            adata,
+            target_sum=1e4,
+            layer="X_normalized",
+        )
+
+        preprocessing_log["normalization_applied"] = True
+        preprocessing_log["normalization_layer"] = "X_normalized"
+        steps_run.append("normalize_total")
+
+    else:
+        if apply_normalization and has_normalization:
+            warnings.append(
+                "Normalization was requested, but 'X_normalized' already exists in adata.layers. Skipping normalization."
+            )
+            preprocessing_log["normalization_applied"] = False
+            preprocessing_log["normalization_layer"] = "X_normalized"
+            steps_skipped.append("normalize_total")
+
+    has_log1p = "X_log1p" in adata.layers
+    if apply_log1p and not has_log1p:
+        if "X_normalized" not in adata.layers:
+            warnings.append(
+                "Log1p transformation was requested, but 'X_normalized' does not exist in adata.layers. Skipping log1p transformation."
+            )
+            steps_skipped.append("log1p")
+
+        else:
+            adata.layers["X_log1p"] = adata.layers["X_normalized"].copy()
+            sc.pp.log1p(adata, layer="X_log1p")
+
+            preprocessing_log["log1p_applied"] = True
+            preprocessing_log["log1p_layer"] = "X_log1p"
+            steps_run.append("log1p")
+
+    elif apply_log1p and has_log1p:
+        warnings.append(
+            "Log1p transformation was requested, but 'X_log1p' already exists in adata.layers. "
+            "Skipping log1p transformation."
+        )
+
+        preprocessing_log["log1p_applied"] = False
+        preprocessing_log["log1p_layer"] = "X_log1p"
+        steps_skipped.append("log1p")
+
+    else:
+        if apply_log1p and has_log1p:
+            warnings.append(
+                "Log1p transformation was requested, but 'X_log1p' already exists in adata.layers. Skipping log1p transformation."
+            )
+
+    has_scaled = "X_scaled" in adata.layers
+
+    if apply_scaling and not has_scaled:
+        if "X_log1p" not in adata.layers:
+            warnings.append(
+                "Scaling was requested, but 'X_log1p' does not exist in adata.layers. "
+                "Skipping scaling."
+            )
+            steps_skipped.append("scale")
+
+        else:
+            adata.layers["X_scaled"] = adata.layers["X_log1p"].copy()
+
+            sc.pp.scale(
+                adata,
+                layer="X_scaled",
+                max_value=10,
+            )
+
+            preprocessing_log["scaling_applied"] = True
+            preprocessing_log["scaled_layer"] = "X_scaled"
+            steps_run.append("scale")
+
+    elif apply_scaling and has_scaled:
+        warnings.append(
+            "Scaling was requested, but 'X_scaled' already exists in adata.layers. "
+            "Skipping scaling."
+        )
+        preprocessing_log["scaling_applied"] = False
+        preprocessing_log["scaled_layer"] = "X_scaled"
+        steps_skipped.append("scale")
+
     # Summary
     overall_summary = make_summary(adata.obs)
 
@@ -219,6 +324,20 @@ def qc_summary(
         f"Median counts per cell: {overall_summary['median_total_counts']:.2f}\n"
         f"Median mitochondrial percentage: {overall_summary['median_pct_mito']:.2f}\n"
         f"Available objs in adata obs: {', '.join(adata.obs.columns)}\n"
+        f"Available layers in adata.layers: {', '.join(adata.layers.keys()) if adata.layers.keys() else 'None'}\n"
+        f"\nPreprocessing:\n"
+        f"Normalization requested: {apply_normalization}\n"
+        f"Normalization applied: {preprocessing_log['normalization_applied']}\n"
+        f"Normalization layer: {preprocessing_log['normalization_layer']}\n"
+        f"Log1p requested: {apply_log1p}\n"
+        f"Log1p applied: {preprocessing_log['log1p_applied']}\n"
+        f"Log1p layer: {preprocessing_log['log1p_layer']}\n"
+        f"Scaling requested: {apply_scaling}\n"
+        f"Scaling applied: {preprocessing_log['scaling_applied']}\n"
+        f"Scaled layer: {preprocessing_log['scaled_layer']}\n"
+        f"Steps run: {', '.join(steps_run) if steps_run else 'None'}\n"
+        f"Steps skipped: {', '.join(steps_skipped) if steps_skipped else 'None'}\n"
+        f""
     )
 
     if filter_applied:
@@ -240,6 +359,9 @@ def qc_summary(
         "processing_state": processing_state,
         "filter_applied": filter_applied,
         "filter_log": filter_log,
+        "preprocessing_log": preprocessing_log,
+        "steps_run": steps_run,
+        "steps_skipped": steps_skipped,
     }
 
     return adata, result
