@@ -8,7 +8,7 @@ set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\unprocessed.h5ad"
 set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_Processed.txt"
 set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Analysis_sweep\logs\Claude"
-set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\60kHypothesis_analysis_1_plan.json"
+set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\claude_haiku_45_r1_unprocessed_newtool_analysis_1_plan.json"
 set "output_dir=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude"
 
 cd /d "%ROOT%"
@@ -95,7 +95,8 @@ for /L %%R in (1,1,%REPEATS%) do (
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
       --output-dir "%output_dir%" ^
-      --analysis-name "%NAME%_r%%R_unprocessed" ^
+      --analysis-name "%NAME%_r%%R_unprocessed_newtool" ^
+      --from-analysis-json "%ANALYSIS_JSON%" ^
       --execution-mode claude ^
       --model-name "%MODEL%" ^
       --execution-model claude-haiku-4-5-20251001 ^

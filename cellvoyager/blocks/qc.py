@@ -227,7 +227,16 @@ def qc_summary(
 
     has_normalization = "X_normalized" in adata.layers
     if apply_normalization and not has_normalization:
-        adata.layers["X_normalized"] = adata.layers["counts"].copy()
+        if "counts" in adata.layers:
+            adata.layers["X_normalized"] = adata.layers["counts"].copy()
+            preprocessing_log["normalization_source"] = "adata.layers['counts']"
+        else:
+            warnings.append(
+                "'counts' layer was not found. Using adata.X as the source for normalization. "
+                "This assumes adata.X contains raw counts."
+            )
+            adata.layers["X_normalized"] = adata.X.copy()
+            preprocessing_log["normalization_source"] = "adata.X"
 
         sc.pp.normalize_total(
             adata,
