@@ -5,11 +5,11 @@ REM CellVoyager analysis-generation sweep
 
 set "REPEATS=1"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
-set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\unprocessed.h5ad"
-set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_Processed.txt"
-set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Analysis_sweep\logs\Claude"
-set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\60kHypothesis_analysis_1_plan.json"
-set "output_dir=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude"
+set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\60k_cells_raw.h5ad"
+set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_raw_60k.txt"
+set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Analysis_sweep\logs\Claude\benchmarks"
+set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\claude_haiku_45_r1_unprocessed_newtool_analysis_1_plan.json"
+set "output_dir=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\benchmarks"
 
 cd /d "%ROOT%"
 
@@ -25,9 +25,9 @@ REM -------- Cloud models --------
 @REM call :RUN_CLOUD "gpt-5.5" "gpt55"
 
 REM -------- Claude models --------
-call :RUN_CLAUDE "anthropic/claude-haiku-4-5-20251001" "claude_haiku_45"
-@REM call :RUN_CLAUDE "anthropic/claude-sonnet-4-6" "claude_sonnet_46"
-@REM call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude_opus_48"
+call :RUN_CLAUDE "anthropic/claude-haiku-4-5-20251001" "claude-haiku-4-5-20251001" "claude_haiku_45"
+call :RUN_CLAUDE "anthropic/claude-sonnet-4-6" "claude-sonnet-4-6" "claude_sonnet_46"
+call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-opus-4-8" "claude_opus_48"
 
 
 pause
@@ -36,7 +36,8 @@ exit /b
 
 :RUN_LOCAL
 set "MODEL=%~1"
-set "NAME=%~2"
+set "execution_model=%~2"
+set "NAME=%~3"
 
 echo.
 echo Loading local model: %MODEL%
@@ -87,7 +88,8 @@ exit /b
 
 :RUN_CLAUDE
 set "MODEL=%~1"
-set "NAME=%~2"
+set "execution_model=%~2"
+set "NAME=%~3"
 
 for /L %%R in (1,1,%REPEATS%) do (
     echo Running %NAME% repeat %%R...
@@ -98,7 +100,8 @@ for /L %%R in (1,1,%REPEATS%) do (
       --analysis-name "%NAME%_r%%R_unprocessed" ^
       --execution-mode claude ^
       --model-name "%MODEL%" ^
-      --execution-model claude-haiku-4-5-20251001 ^
+      --from-analysis-json "%ANALYSIS_JSON%" ^
+      --execution-model "%execution_model%" ^
       --log-home "%LOGS%" ^
       --log-prompts ^
       --stop-jupyter-on-complete
