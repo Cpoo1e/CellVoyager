@@ -1254,59 +1254,106 @@ INTERACTIVE MODE (TERMINAL): The user provides feedback directly in the terminal
 You are executing a single-cell transcriptomics analysis in a LIVE notebook.
 
 You have custom notebook tools. Use them directly.
-{interactive_block}
+
+CUSTOM MCP TOOLS AVAILABLE — IMPORTANT:
+
+1. `run_qc_summary_template`
+   Use this for standard preprocessing tasks, including:
+   - QC metric calculation
+   - mitochondrial gene identification
+   - grouped QC summaries
+   - cell/gene filtering
+   - normalization
+   - log1p transformation
+   - scaling
+
+   Individual actions can be enabled or disabled using the tool flags.
+
+CUSTOM TOOL CALLING RULES — IMPORTANT:
+
+Custom CellVoyager tools are MCP tools. They are NOT Python functions inside the notebook.
+
+Correct:
+- Call `run_qc_summary_template` directly as an MCP tool when doing QC, filtering, normalization, log1p transformation, or scaling.
+
+Incorrect:
+- Do NOT write `mcp__jupyter__run_qc_summary_template(...)` inside a notebook code cell.
+- Do NOT write `run_qc_summary_template(...)` inside a notebook code cell.
+- Do NOT write `cv_run_qc_summary(...)` manually unless the MCP tool has already failed and you are explicitly recovering.
+- Do NOT recreate Scanpy code for QC, filtering, normalization, log1p transformation, or scaling if `run_qc_summary_template` can do it.
+
+Before writing any custom Python code, ask:
+“Is this task covered by an MCP template tool?”
+
+If yes, call the MCP tool directly.
+
+If the MCP tool only completes part of the required step, call the tool first. Then add a separate minimal custom code cell after the tool-generated cell only for the unsupported part of the step, such as extra plotting or a specialised statistical test.
+
+If the MCP tool fails:
+1. Inspect the tool error.
+2. Retry the same MCP tool once with corrected arguments if the issue is fixable.
+3. Only fall back to custom Python code if the MCP tool cannot complete the task after a corrected retry.
+4. If falling back to custom code, briefly explain why the tool was insufficient.
 
 Required workflow:
-1. Call use_notebook with notebook_path="{notebook_path}" — this automatically runs the setup cell (loads AnnData ONCE per kernel session). Do NOT add or run step 1 until use_notebook returns successfully.
 
-2. Add the step 1 markdown summary cell. Then perform step 1 using the correct execution route:
-   - If an available custom tool can complete step 1, call that custom tool directly. Do NOT add an extra custom code cell for the same task.
-   - If no available custom tool can complete step 1, add the step 1 code cell manually using the first step code template below, with index=None, execute that new code cell, inspect with read_cell, then continue.
-   - IMPORTANT: AnnData is already loaded in memory as `adata` by setup. Reuse that in step 1 and all later steps. Do NOT call sc.read_h5ad again.
-   - Available custom tools are external notebook tools, not Python functions inside the notebook kernel. To use a custom tool, call it directly as a tool. Do NOT write tool calls such as `mcp__jupyter__run_qc_summary_template(...)` inside notebook code cells.
-   - After the step execution succeeds, add a markdown interpretation cell covering output summary + whether changing next steps + why.
+1. Call `use_notebook` with notebook_path="{notebook_path}" — this automatically runs the setup cell and loads AnnData once per kernel session. Do NOT add or run Step 1 until `use_notebook` returns successfully.
 
-3. For every remaining step in the analysis plan:
-   - add a markdown summary cell in this format:
+2. For every step in the analysis plan:
+   - Add a markdown summary cell in this format:
+
      ## Step N summary - Short summary in header
-     
-     A more detailed 1-2 sentences explaining the motivation behind this step.
-     (Use the word "summary" in the header, e.g. "## Step 2 summary - Load and QC data")
-   - decide whether an available custom tool can complete the step, or the relevant standard part of the step
-   - if a custom tool can complete the step, call that tool directly. Do NOT add an extra custom code cell for the same task.
-   - if only part of the step is covered by a custom tool, call the tool for that part first, then add custom code only for the unsupported part
-   - only if no available custom tool can complete the required task, add a custom code cell implementing that step
-   - execute the selected tool or custom code
-   - inspect outputs with read_cell and/or the returned tool result
-   - if a custom code cell fails, fix that same code cell with overwrite_cell_source and re-run
-   - you may try at most 3 fixes for the same custom code step
-   - if still failing after 3 fixes, abandon that step and move to a different useful step
-   - after every successful tool execution or code execution, add a markdown interpretation cell (header like "## Step N — Interpretation: ...") that:
-     (a) interprets the output, including figures, printed text, and tool summaries: what do the results show?
-     (b) states whether you are changing the next steps or keeping the original plan
-     (c) explains why: if changing, why the results justify a different approach; if keeping, why the current plan still holds
 
-4. If the results suggest a better next step, update the plan in notebook markdown and continue.
-5. End with a final markdown summary of findings.
+     A more detailed 1-2 sentence explanation of the motivation behind this step.
 
-First step code template:
-Use this only if no available custom tool can perform step 1 adequately. If step 1 involves standard QC metrics, grouped QC summaries, filtering, normalization, log1p transformation, or scaling, call `run_qc_summary_template` directly instead of inserting equivalent custom code.
+   - Decide whether an available custom MCP tool can complete the whole step or part of the step.
+   - If a custom MCP tool can complete the step, call that tool directly.
+   - If only part of the step is covered by a custom MCP tool, call the tool first, then add minimal custom code only for the unsupported part.
+   - Only if no available custom MCP tool can complete the required task should you add a custom code cell.
+   - Execute the selected MCP tool or custom code cell.
+   - Inspect the output using the returned tool result first. Use `read_cell` only if you need to inspect a notebook cell output.
+   - If a custom code cell fails, fix that same code cell with `overwrite_cell_source` and re-run it.
+   - You may try at most 3 fixes for the same custom code step.
+   - If still failing after 3 fixes, abandon that step and move to a different useful step.
+   - After every successful MCP tool execution or custom code execution, add a markdown interpretation cell with a header like:
 
-```python
-{first_step_code}
-```
-CRITICAL — Step limit: You MUST complete the analysis in at most {self.max_iterations} interpretation steps (each step = one code cell + one interpretation markdown). Do NOT exceed this limit. Once you have reached step {self.max_iterations}, write your final summary and stop. Prioritize the most important steps if the plan is long.
+     ## Step N — Interpretation: Short interpretation title
+
+     The interpretation must:
+     (a) interpret the output, including figures, printed text, and tool summaries;
+     (b) state whether the next steps are changing or staying the same;
+     (c) explain why.
+
+3. If the results suggest a better next step, update the plan in notebook markdown and continue.
+
+4. End with a final markdown summary of findings.
+
+5. All future cells should be appended after the most recently added cell. Do not insert new cells above previous analysis cells.
+
+CRITICAL — Step limit:
+You MUST complete the analysis in at most {self.max_iterations} interpretation steps.
+
+Each step means one main execution action plus one interpretation markdown cell.
+The execution action can be either:
+- one MCP tool call, or
+- one custom code cell, or
+- one MCP tool call followed by minimal custom code only if the tool does not cover the full step.
+
+Do NOT exceed this limit. Once you have reached Step {self.max_iterations}, write your final summary and stop. Prioritize the most important steps if the plan is long.
 
 Critical behavior:
-- Actually execute the selected custom tool or custom code. Do not just describe what you would do.
-- Use available custom tools directly whenever they can complete the task. Do not recreate tool functionality with custom Python code.
-- Custom tools are external notebook tools, not Python functions inside the notebook kernel. Never write `mcp__jupyter__...` tool calls inside notebook code cells.
-- Use read_cell after running code, and use returned tool results after calling tools, so you can interpret outputs.
-- After each successful tool execution or code cell execution, add an interpretation markdown cell covering: what the output shows, whether you are adjusting your next steps, and why.
+- Actually execute the selected custom MCP tool or custom code. Do not just describe what you would do.
+- Use available custom MCP tools directly whenever they can complete the task.
+- Do not recreate tool functionality with custom Python code.
+- Custom tools are external notebook tools, not Python functions inside the notebook kernel.
+- Never write `mcp__jupyter__...` tool calls inside notebook code cells.
+- Use returned tool results after calling tools so you can interpret outputs.
+- Use `read_cell` after running custom code cells so you can interpret outputs.
+- After each successful MCP tool execution or custom code cell execution, add an interpretation markdown cell.
 - Keep the notebook clean and readable.
-- Do not use hidden scratchpads; put summaries/interpretations in markdown cells.
+- Do not use hidden scratchpads; put summaries and interpretations in markdown cells.
 - Never re-load the dataset after setup; always reuse the existing `adata` object.
-- If a custom tool is used, the tool execution counts as the step's execution action. Do not add a separate custom code cell for the same task.
+- If a custom tool is used, the tool execution counts as the step's main execution action.
 - A markdown cell inserted automatically by a tool does NOT replace the required Step N interpretation cell.
 
 Notebook already contains:
@@ -1325,8 +1372,7 @@ adata summary: {self.adata_summary[:3000]}
 
 user context (dataset summary / past analyses / focus directions / biological background): {self.paper_summary[:3000]}
 
-coding guidelines: {self.coding_guidelines[:3000]}
-""".strip()
+coding guidelines: {self.coding_guidelines[:3000]}""".strip()
 
     def _log_stream_item(self, item: Any) -> None:
         """Logs:
