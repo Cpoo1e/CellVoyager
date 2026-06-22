@@ -47,6 +47,134 @@ def now_str() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _insert_default_plot(
+    session: NotebookSession,
+    step_number: int,
+    plot_type: str,
+    make_plot: bool = True,
+    leiden_key: str = "leiden",
+    colour_by: list[str] | None = None,
+) -> dict[str, Any]:
+    """Insert and execute a short default plot cell for a CellVoyager MCP tool."""
+
+    if not make_plot:
+        return {
+            "plot_created": False,
+            "plot_cell_index": None,
+            "plot_output_preview": "",
+        }
+
+    if plot_type == "qc":
+        source = f"""# CellVoyager default QC plot for Step {step_number}
+import matplotlib.pyplot as plt
+
+metrics = [
+    m for m in ["total_counts", "n_genes_by_counts", "pct_counts_mt"]
+    if m in adata.obs.columns
+]
+
+if metrics:
+    fig, axes = plt.subplots(1, len(metrics), figsize=(4 * len(metrics), 3))
+    axes = [axes] if len(metrics) == 1 else axes
+
+    for ax, metric in zip(axes, metrics):
+        ax.hist(adata.obs[metric].dropna(), bins=50)
+        ax.set_title(metric)
+        ax.set_xlabel(metric)
+        ax.set_ylabel("Cells")
+
+    plt.tight_layout()
+    plt.show()
+
+    # Scanpy violin plots
+    sc.pl.violin(
+        adata,
+        keys=metrics,
+        jitter=0.4,
+        multi_panel=True,
+        show=True,
+    )
+else:
+    print("No QC metrics found in adata.obs to plot.")
+"""
+
+    elif plot_type == "hvg":
+        source = f"""# CellVoyager default HVG plot for Step {step_number}
+import matplotlib.pyplot as plt
+import scanpy as sc
+
+if "highly_variable" in adata.var.columns:
+    try:
+        sc.pl.highly_variable_genes(adata, show=False)
+        plt.show()
+    except Exception:
+        n_hvgs = int(adata.var["highly_variable"].sum())
+        plt.figure(figsize=(4, 3))
+        plt.bar(["HVGs"], [n_hvgs])
+        plt.ylabel("Genes")
+        plt.title("Highly variable genes selected")
+        plt.tight_layout()
+        plt.show()
+else:
+    print("No highly_variable column found in adata.var.")
+"""
+
+    elif plot_type == "dimred":
+        candidate_colors = colour_by or [
+            leiden_key,
+            "disease_state",
+            "collection_day",
+            "chromium_batch",
+            "sample_id",
+            "PatientID",
+        ]
+
+        source = f"""# CellVoyager default dimensionality reduction plot for Step {step_number}
+import matplotlib.pyplot as plt
+import scanpy as sc
+
+candidate_colors = {candidate_colors!r}
+
+available_colors = [
+    c for c in candidate_colors
+    if c in adata.obs.columns or c in adata.var_names
+]
+
+if "X_umap" in adata.obsm:
+    sc.pl.umap(
+        adata,
+        color=available_colors[:4] if available_colors else None,
+        show=False,
+    )
+    plt.show()
+elif "X_pca" in adata.obsm:
+    sc.pl.pca(
+        adata,
+        color=available_colors[:4] if available_colors else None,
+        show=False,
+    )
+    plt.show()
+else:
+    print("No UMAP or PCA embedding found in adata.obsm.")
+"""
+
+    else:
+        return {
+            "plot_created": False,
+            "plot_cell_index": None,
+            "plot_output_preview": f"Unknown plot_type: {plot_type}",
+        }
+
+    executed = session.insert_execute_code_cell(index=None, source=source)
+
+    return {
+        "plot_created": bool(executed.get("ok")),
+        "plot_cell_index": executed.get("cell_index"),
+        "plot_output_preview": executed.get("output_preview", "")[:500],
+        "plot_error": executed.get("error"),
+    }
+
+
 # -----------------------------------------------------------------------------
 # Notebook + kernel state (owned by the MCP server)
 # -----------------------------------------------------------------------------
@@ -626,6 +754,7 @@ def run_mcp_server() -> None:
         max_counts: int = 50000,
         max_mito_pct: float | None = None,
         min_cell_per_gene: int = 3,
+        make_plot: bool = True,
     ) -> dict[str, Any]:
         """
         Run the predefined CellVoyager QC summary/preprocessing template.
@@ -633,6 +762,21 @@ def run_mcp_server() -> None:
         Use this instead of writing custom code when the step requires standard
         QC metrics, grouped QC summaries, optional filtering, normalization,
         log1p transformation, or scaling.
+
+        Parameters:
+        - step_number: The current step number in the analysis plan.
+        - reason: A string explaining why the QC summary template was selected.
+        - groupby: Optional list of column names in adata.obs to group QC summaries.
+        - apply_filters: Whether to apply filtering based on QC metrics.
+        - apply_normalization: Whether to apply normalization to the data.
+        - apply_log1p: Whether to apply log1p transformation to the data.
+        - apply_scaling: Whether to apply scaling to the data.
+        - min_genes: Minimum number of genes per cell for filtering.
+        - min_counts: Minimum number of counts per cell for filtering.
+        - max_counts: Maximum number of counts per cell for filtering.
+        - max_mito_pct: Maximum percentage of mitochondrial genes per cell for filtering.
+        - min_cell_per_gene: Minimum number of cells per gene for filtering.
+        - make_plot: Whether to generate a default QC plot after running the template.
         """
 
         session = REGISTRY.require_current()
@@ -756,6 +900,18 @@ A JSON copy was saved to:
 
 Later steps should use the current live `adata` object.
 """
+        session.insert_cell(
+            index=None,
+            cell_type="markdown",
+            source=summary_md,
+        )
+
+        plot_result = _insert_default_plot(
+            session=session,
+            step_number=step_number,
+            plot_type="qc",
+            make_plot=make_plot,
+        )
 
         return {
             "ok": True,
@@ -764,12 +920,407 @@ Later steps should use the current live `adata` object.
             "summary": result.get("message", "")[:1000],
             "summary_md": summary_md,
             "stored_result_path": str(result_path),
+            "plot_created": plot_result["plot_created"],
+            "plot_cell_index": plot_result["plot_cell_index"],
+            "plot_output_preview": plot_result["plot_output_preview"],
+            "plot_error": plot_result.get("plot_error"),
             "compact_result": {
                 "status": result.get("status"),
                 "warnings": warnings_list,
                 "filter_applied": result.get("filter_applied"),
                 "filter_log": filter_log,
                 "preprocessing_log": preprocessing_log,
+                "steps_run": steps_run,
+                "steps_skipped": steps_skipped,
+            },
+        }
+
+    @mcp.tool()
+    def run_dimensional_reduction_summary_template(
+        step_number: int,
+        reason: str = "",
+        layer: str | None = "X_log1p",
+        use_hvgs: bool = True,
+        n_top_genes: int = 2000,
+        n_pcs: int = 50,
+        neighbors_n_pcs: int = 25,
+        n_neighbors: int = 15,
+        run_pca: bool = True,
+        run_neighbors: bool = True,
+        run_umap: bool = True,
+        run_tsne: bool = False,
+        run_leiden: bool = True,
+        leiden_resolution: float = 0.5,
+        leiden_key: str = "leiden",
+        force: bool = False,
+        make_plot: bool = True,
+        colour_by: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Run the predefined CellVoyager dimensionality reduction summary template.
+
+        Use this instead of writing custom code when the step requires standard
+        HVG selection, PCA, neighbour graph construction, UMAP, t-SNE, or Leiden
+        clustering.
+
+        Parameters:
+        - step_number: The current step number in the analysis plan.
+        - reason: A string explaining why the dimensionality reduction template was selected.
+        - layer: The data layer to use for analysis (default: "X_log1p"), always used X_log1p unless the hypothesis says otherwise.
+        - use_hvgs: Whether to use highly variable genes (default: True).
+        - n_top_genes: Number of top highly variable genes to select (default:
+        2000).
+        - n_pcs: Number of principal components to compute (default: 50).
+        - neighbors_n_pcs: Number of PCs to use for neighbour graph (default: 25).
+        - n_neighbors: Number of neighbours for graph construction (default: 15).
+        - run_pca: Whether to run PCA (default: True).
+        - run_neighbors: Whether to compute neighbour graph (default: True).
+        - run_umap: Whether to compute UMAP embedding (default: True).
+        - run_tsne: Whether to compute t-SNE embedding (default: False).
+        - run_leiden: Whether to run Leiden clustering (default: True).
+        - leiden_resolution: Resolution parameter for Leiden clustering (default:
+        0.5).
+        - leiden_key: Key to store Leiden clustering results in adata.obs (default: "leiden").
+        - force: Whether to force re-computation of results even if they already exist (default: False).
+        - make_plot: Whether to generate a default dimensionality reduction plot after running the template (default: True).
+        - colour_by: Optional list of column names in adata.obs to colour the plot by (default: None).
+        """
+
+        session = REGISTRY.require_current()
+
+        paused_by_user, user_feedback = _force_gui_pause_if_requested(session)
+        if paused_by_user:
+            return _paused_ack(user_feedback)
+
+        result_key = f"dimred_summary_step_{step_number}_{int(time.time())}"
+        result_path = (
+            session.path.parent / "cellvoyager_tool_results" / f"{result_key}.json"
+        )
+
+        source = f"""# CellVoyager template call: dimensionality reduction / clustering
+dimred_result = cv_run_dimensionality_reduction_summary(
+    key={result_key!r},
+    layer={layer!r},
+    use_hvgs={use_hvgs!r},
+    n_top_genes={n_top_genes!r},
+    n_pcs={n_pcs!r},
+    neighbors_n_pcs={neighbors_n_pcs!r},
+    n_neighbors={n_neighbors!r},
+    run_pca={run_pca!r},
+    run_neighbors={run_neighbors!r},
+    run_umap={run_umap!r},
+    run_tsne={run_tsne!r},
+    run_leiden={run_leiden!r},
+    leiden_resolution={leiden_resolution!r},
+    leiden_key={leiden_key!r},
+    force={force!r},
+    )
+    """
+
+        executed = session.insert_execute_code_cell(index=None, source=source)
+
+        if not executed.get("ok"):
+            error = executed.get("error", "Unknown error")
+
+            summary_md = f"""## Step {step_number} — Dimensionality reduction template failed
+
+    The predefined dimensionality reduction template was selected because: {reason}
+
+    The tool failed, so the agent should either fix the issue or continue with custom code.
+
+    ```text
+    {error}
+    ```
+    """
+
+            return {
+                "ok": False,
+                "tool": "run_dimensional_reduction_summary_template",
+                "result_key": result_key,
+                "error": error,
+                "summary_md": summary_md,
+            }
+
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except Exception:
+            result = {
+                "status": "unknown",
+                "message": executed.get("output_preview", "")[:1000],
+                "warnings": ["Could not read structured result JSON."],
+                "results": {},
+                "processing_state_before": {},
+                "processing_state_after": {},
+            }
+
+        results = result.get("results", {})
+        processing_state_before = result.get("processing_state_before", {})
+        processing_state_after = result.get("processing_state_after", {})
+        warnings_list = result.get("warnings", [])
+        steps_run = results.get("steps_run", [])
+        steps_skipped = results.get("steps_skipped", [])
+
+        warning_text = ""
+        if warnings_list:
+            warning_text = "\n\n**Warnings:**\n" + "\n".join(
+                f"- {warning}" for warning in warnings_list
+            )
+
+        summary_md = f"""## Step {step_number} — Tool summary: dimensionality reduction template
+
+The predefined dimensionality reduction/clustering template was used instead of writing new custom code.
+
+**Reason selected:** {reason}
+
+**Tool status:** `{result.get("status", "unknown")}`
+
+| Metric | Value |
+|---|---:|
+| Cells | {results.get("n_cells", "NA")} |
+| Genes | {results.get("n_genes", "NA")} |
+| Layer used | {results.get("layer_used", "adata.X")} |
+| HVGs used | {results.get("use_hvgs", "NA")} |
+| Number of HVGs | {results.get("n_hvgs", "NA")} |
+| PCs requested | {results.get("n_pcs_requested", "NA")} |
+| PCs used | {results.get("n_pcs_used", "NA")} |
+| PCs used for neighbours | {results.get("neighbors_n_pcs_used", "NA")} |
+| Number of neighbours | {results.get("n_neighbors", "NA")} |
+| PCA present | {processing_state_after.get("has_pca", "NA")} |
+| Neighbours present | {processing_state_after.get("has_neighbors", "NA")} |
+| UMAP present | {processing_state_after.get("has_umap", "NA")} |
+| t-SNE present | {processing_state_after.get("has_tsne", "NA")} |
+| Leiden key | {results.get("leiden_key", leiden_key)} |
+| Leiden clusters | {results.get("n_leiden_clusters", "NA")} |
+
+**Steps run:** {", ".join(steps_run) if steps_run else "None"}  
+**Steps skipped:** {", ".join(steps_skipped) if steps_skipped else "None"}
+
+{warning_text}
+
+The full result is stored for later steps in:
+
+```python
+cv_tool_results["{result_key}"]
+adata.uns["cellvoyager_tool_results"]["{result_key}"]
+```
+
+A JSON copy was saved to:
+
+```text
+{result_path}
+```
+
+Later steps should use the current live `adata` object.
+"""
+
+        session.insert_cell(
+            index=None,
+            cell_type="markdown",
+            source=summary_md,
+        )
+
+        plot_result = _insert_default_plot(
+            session=session,
+            step_number=step_number,
+            plot_type="dimred",
+            make_plot=make_plot,
+            colour_by=colour_by,
+        )
+
+        return {
+            "ok": True,
+            "tool": "run_dimensional_reduction_summary_template",
+            "result_key": result_key,
+            "summary": result.get("message", "")[:1000],
+            "summary_md": summary_md,
+            "stored_result_path": str(result_path),
+            "plot_created": plot_result["plot_created"],
+            "plot_cell_index": plot_result["plot_cell_index"],
+            "plot_output_preview": plot_result["plot_output_preview"],
+            "plot_error": plot_result.get("plot_error"),
+            "compact_result": {
+                "status": result.get("status"),
+                "warnings": warnings_list,
+                "results": results,
+                "processing_state_before": processing_state_before,
+                "processing_state_after": processing_state_after,
+                "steps_run": steps_run,
+                "steps_skipped": steps_skipped,
+            },
+        }
+
+    @mcp.tool()
+    def run_compute_hvgs_template(
+        step_number: int,
+        reason: str = "",
+        flavor: str = "seurat_v3",
+        n_top_genes: int = 2000,
+        subset: bool = False,
+        layer: str | None = None,
+        force: bool = False,
+        make_plot: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Run the predefined CellVoyager compute HVGs template.
+
+        Use this instead of writing custom code when the step requires standard
+        HVG selection.
+
+        Parameters:
+        - step_number: The current step number in the analysis plan.
+        - reason: A string explaining why the compute HVGs template was selected.
+        - flavor: The HVG selection method to use (default: "seurat_v3").
+        - n_top_genes: Number of top highly variable genes to select (default:
+        2000).
+        - subset: Whether to subset the data to HVGs (default: False).
+        - layer: The data layer to use for HVG computation (default: None, which means use adata.X).
+        - make_plot: Whether to generate a default HVG plot after running the template (default: True).
+        - force: Whether to force re-computation of results even if they already exist (default
+        """
+
+        session = REGISTRY.require_current()
+
+        paused_by_user, user_feedback = _force_gui_pause_if_requested(session)
+        if paused_by_user:
+            return _paused_ack(user_feedback)
+
+        result_key = f"compute_hvgs_step_{step_number}_{int(time.time())}"
+        result_path = (
+            session.path.parent / "cellvoyager_tool_results" / f"{result_key}.json"
+        )
+
+        source = f"""# CellVoyager template call: compute highly variable genes
+hvg_result = cv_run_hvgs(
+    key={result_key!r},
+    flavor={flavor!r},
+    n_top_genes={n_top_genes!r},
+    subset={subset!r},
+    layer={layer!r},
+    force={force!r},
+)
+    """
+
+        executed = session.insert_execute_code_cell(index=None, source=source)
+
+        if not executed.get("ok"):
+            error = executed.get("error", "Unknown error")
+
+            summary_md = f"""## Step {step_number} — HVG template failed
+
+    The predefined HVG selection template was selected because: {reason}
+
+    The tool failed, so the agent should either fix the issue or continue with custom code.
+
+    ```text
+    {error}
+    ```
+    """
+
+            return {
+                "ok": False,
+                "tool": "run_compute_hvgs_template",
+                "result_key": result_key,
+                "error": error,
+                "summary_md": summary_md,
+            }
+
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except Exception:
+            result = {
+                "status": "unknown",
+                "message": executed.get("output_preview", "")[:1000],
+                "warnings": ["Could not read structured result JSON."],
+                "results": {},
+                "processing_state_before": {},
+                "processing_state_after": {},
+                "steps_run": [],
+                "steps_skipped": [],
+            }
+
+        results = result.get("results", {})
+        processing_state_before = result.get("processing_state_before", {})
+        processing_state_after = result.get("processing_state_after", {})
+        warnings_list = result.get("warnings", [])
+        steps_run = result.get("steps_run", results.get("steps_run", []))
+        steps_skipped = result.get("steps_skipped", results.get("steps_skipped", []))
+
+        warning_text = ""
+        if warnings_list:
+            warning_text = "\n\n**Warnings:**\n" + "\n".join(
+                f"- {warning}" for warning in warnings_list
+            )
+
+        summary_md = f"""## Step {step_number} — Tool summary: HVG selection template
+
+    The predefined HVG selection template was used instead of writing new custom code.
+
+    **Reason selected:** {reason}
+
+    **Tool status:** `{result.get("status", "unknown")}`
+
+    | Metric | Value |
+    |---|---:|
+    | Cells | {results.get("n_cells", "NA")} |
+    | Genes | {results.get("n_genes", "NA")} |
+    | HVGs selected | {results.get("n_hvgs", "NA")} |
+    | HVG flavor | {results.get("flavor", flavor)} |
+    | Top genes requested | {results.get("n_top_genes", n_top_genes)} |
+    | Layer used | {results.get("layer_used", "adata.X")} |
+    | Subset to HVGs | {results.get("subset", subset)} |
+    | Force recompute | {results.get("force", force)} |
+
+    **Steps run:** {", ".join(steps_run) if steps_run else "None"}  
+    **Steps skipped:** {", ".join(steps_skipped) if steps_skipped else "None"}
+
+    {warning_text}
+
+    The full result is stored for later steps in:
+
+    ```python
+    cv_tool_results["{result_key}"]
+    adata.uns["cellvoyager_tool_results"]["{result_key}"]
+    ```
+
+    A JSON copy was saved to:
+
+    ```text
+    {result_path}
+    ```
+
+    Later steps should use the current live `adata` object.
+    """
+
+        session.insert_cell(
+            index=None,
+            cell_type="markdown",
+            source=summary_md,
+        )
+
+        plot_result = _insert_default_plot(
+            session=session,
+            step_number=step_number,
+            plot_type="hvg",
+            make_plot=make_plot,
+        )
+
+        return {
+            "ok": True,
+            "tool": "run_compute_hvgs_template",
+            "result_key": result_key,
+            "summary": result.get("message", "")[:1000],
+            "summary_md": summary_md,
+            "stored_result_path": str(result_path),
+            "plot_created": plot_result["plot_created"],
+            "plot_cell_index": plot_result["plot_cell_index"],
+            "plot_output_preview": plot_result["plot_output_preview"],
+            "plot_error": plot_result.get("plot_error"),
+            "compact_result": {
+                "status": result.get("status"),
+                "warnings": warnings_list,
+                "results": results,
+                "processing_state_before": processing_state_before,
+                "processing_state_after": processing_state_after,
                 "steps_run": steps_run,
                 "steps_skipped": steps_skipped,
             },
@@ -1154,6 +1705,8 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from cellvoyager.blocks.qc import qc_summary
+from cellvoyager.blocks.dimensional_reduction import dimensional_reduction_summary
+from cellvoyager.blocks.hvgs import compute_hvgs
 
 print("Loading data...")
 adata = sc.read_h5ad(r'''{self.h5ad_path}''')
@@ -1192,6 +1745,32 @@ def cv_run_qc_summary(key, **kwargs):
     result_path = cv_save_tool_result(key, result)
 
     print(f"QC summary completed.")
+
+    return result
+
+def cv_run_hvgs(key, **kwargs):
+    global adata
+
+    adata, result = compute_hvgs(
+        adata=adata,
+        **kwargs,
+    )
+    result_path = cv_save_tool_result(key, result)
+
+    print(f"Highly variable genes selection completed.")
+
+    return result
+
+def cv_run_dimensionality_reduction_summary(key, **kwargs):
+    global adata
+
+    adata, result = dimensional_reduction_summary(
+        adata=adata,
+        **kwargs,
+    )
+    result_path = cv_save_tool_result(key, result)
+
+    print(f"Dimensionality reduction summary completed.")
 
     return result
 """
@@ -1253,113 +1832,82 @@ INTERACTIVE MODE (TERMINAL): The user provides feedback directly in the terminal
         return f"""
 You are executing a single-cell transcriptomics analysis in a LIVE notebook.
 
-You have custom notebook tools. Use them directly.
+FIRST ACTION:
+Immediately call `mcp__jupyter__use_notebook` with notebook_path="{notebook_path}".
+Do not call ToolSearch. Do not describe the call first.
 
-CUSTOM MCP TOOLS AVAILABLE — IMPORTANT:
+AVAILABLE MCP TOOLS:
 
-1. `run_qc_summary_template`
-   Use this for standard preprocessing tasks, including:
-   - QC metric calculation
-   - mitochondrial gene identification
-   - grouped QC summaries
-   - cell/gene filtering
-   - normalization
-   - log1p transformation
-   - scaling
+* `mcp__jupyter__run_qc_summary_template`: QC metrics, filtering, normalization, log1p, scaling.
+* `mcp__jupyter__run_compute_hvgs_template`: highly variable gene selection.
+* `mcp__jupyter__run_dimensional_reduction_summary_template`: PCA, neighbour graph, UMAP, t-SNE, Leiden clustering. (Clustering should always be done on the log1p layer unless the hypothesis explicitly says otherwise)
+* Notebook tools: `insert_cell`, `insert_execute_code_cell`, `read_cell`, `read_notebook`, `overwrite_cell_source`.
 
-   Individual actions can be enabled or disabled using the tool flags.
+TOOL-FIRST RULE:
+Use MCP tools directly whenever they cover the task.
+Never write MCP tool calls inside notebook code cells.
+Do not manually recreate QC, filtering, normalization, log1p, scaling, HVG selection, PCA, neighbours, UMAP, or Leiden if an MCP tool can do it.
+Only use custom Python for unsupported analysis, short plotting, specialised statistics, or fixing failed custom code. If custom code is used, it should include plotting and statistics, DO NOT SAVE ANY PLOTS
 
-CUSTOM TOOL CALLING RULES — IMPORTANT:
+REQUIRED STRUCTURE FOR EVERY STEP:
+Each logical step must follow this exact order:
 
-Custom CellVoyager tools are MCP tools. They are NOT Python functions inside the notebook.
+1. Markdown summary cell
+   Add with `insert_cell(index=None, cell_type="markdown", source=...)`.
 
-Correct:
-- Call `run_qc_summary_template` directly as an MCP tool when doing QC, filtering, normalization, log1p transformation, or scaling.
+   Header format:
+   `## Step N summary - Short summary`
 
-Incorrect:
-- Do NOT write `mcp__jupyter__run_qc_summary_template(...)` inside a notebook code cell.
-- Do NOT write `run_qc_summary_template(...)` inside a notebook code cell.
-- Do NOT write `cv_run_qc_summary(...)` manually unless the MCP tool has already failed and you are explicitly recovering.
-- Do NOT recreate Scanpy code for QC, filtering, normalization, log1p transformation, or scaling if `run_qc_summary_template` can do it.
+   Include 1-2 sentences explaining the purpose of the step.
 
-Before writing any custom Python code, ask:
-“Is this task covered by an MCP template tool?”
+2a. Execution sequence
+   Run the analysis for that step using:
 
-If yes, call the MCP tool directly.
+   * one MCP tool call; or
+   * one custom code cell; or
+   * multiple tightly related MCP/code actions if they are needed for the same logical step. 
 
-If the MCP tool only completes part of the required step, call the tool first. Then add a separate minimal custom code cell after the tool-generated cell only for the unsupported part of the step, such as extra plotting or a specialised statistical test.
+2b. Tool Output Cell, If a tool is used, it will create an output summary for the user, this should be remembered as an existing cell and future steps should be appended after it
 
-If the MCP tool fails:
-1. Inspect the tool error.
-2. Retry the same MCP tool once with corrected arguments if the issue is fixable.
-3. Only fall back to custom Python code if the MCP tool cannot complete the task after a corrected retry.
-4. If falling back to custom code, briefly explain why the tool was insufficient.
+2c. Tool Plotting Cell, If plotting is enabled, the tool will create a plotting cell for the user, this should be remembered as an existing cell and future steps should be appended after it
 
-Required workflow:
+3. Markdown interpretation cell
+   Add with `insert_cell(index=None, cell_type="markdown", source=...)`.
 
-1. Call `use_notebook` with notebook_path="{notebook_path}" — this automatically runs the setup cell and loads AnnData once per kernel session. Do NOT add or run Step 1 until `use_notebook` returns successfully.
+   Header format:
+   `## Step N — Interpretation: Short title`
 
-2. For every step in the analysis plan:
-   - Add a markdown summary cell in this format:
+   Interpret both the analysis output and the plot. State whether the next steps are changing or staying the same, and why.
 
-     ## Step N summary - Short summary in header
+IMPORTANT ORDERING RULES:
 
-     A more detailed 1-2 sentence explanation of the motivation behind this step.
+* Do not add the interpretation cell until both the step execution, tool summary and the plotting cell are complete.
+* Do not add interpretation cells between actions within the same step.
+* Do not start a new step before writing the previous step interpretation.
+* A markdown cell inserted automatically by a tool does not replace the required Step N interpretation cell.
+* The step limit counts interpretation cells, not tool/code/plot cells.
+* Each new cell should be appended at the end of the notebook (index=None) to preserve user edits and inserted cells.
 
-   - Decide whether an available custom MCP tool can complete the whole step or part of the step.
-   - If a custom MCP tool can complete the step, call that tool directly.
-   - If only part of the step is covered by a custom MCP tool, call the tool first, then add minimal custom code only for the unsupported part.
-   - Only if no available custom MCP tool can complete the required task should you add a custom code cell.
-   - Execute the selected MCP tool or custom code cell.
-   - Inspect the output using the returned tool result first. Use `read_cell` only if you need to inspect a notebook cell output.
-   - If a custom code cell fails, fix that same code cell with `overwrite_cell_source` and re-run it.
-   - You may try at most 3 fixes for the same custom code step.
-   - If still failing after 3 fixes, abandon that step and move to a different useful step.
-   - After every successful MCP tool execution or custom code execution, add a markdown interpretation cell with a header like:
+ERROR HANDLING:
 
-     ## Step N — Interpretation: Short interpretation title
+* If an MCP tool fails, inspect the error and retry once with corrected arguments if the fix is obvious.
+* Only fall back to custom code if the tool cannot complete the task after a corrected retry.
+* If custom code fails, fix that same cell with `overwrite_cell_source`, retry up to 3 times, then move on.
 
-     The interpretation must:
-     (a) interpret the output, including figures, printed text, and tool summaries;
-     (b) state whether the next steps are changing or staying the same;
-     (c) explain why.
+GLOBAL RULES:
 
-3. If the results suggest a better next step, update the plan in notebook markdown and continue.
-
-4. End with a final markdown summary of findings.
-
-5. All future cells should be appended after the most recently added cell. Do not insert new cells above previous analysis cells.
-
-CRITICAL — Step limit:
-You MUST complete the analysis in at most {self.max_iterations} interpretation steps.
-
-Each step means one main execution action plus one interpretation markdown cell.
-The execution action can be either:
-- one MCP tool call, or
-- one custom code cell, or
-- one MCP tool call followed by minimal custom code only if the tool does not cover the full step.
-
-Do NOT exceed this limit. Once you have reached Step {self.max_iterations}, write your final summary and stop. Prioritize the most important steps if the plan is long.
-
-Critical behavior:
-- Actually execute the selected custom MCP tool or custom code. Do not just describe what you would do.
-- Use available custom MCP tools directly whenever they can complete the task.
-- Do not recreate tool functionality with custom Python code.
-- Custom tools are external notebook tools, not Python functions inside the notebook kernel.
-- Never write `mcp__jupyter__...` tool calls inside notebook code cells.
-- Use returned tool results after calling tools so you can interpret outputs.
-- Use `read_cell` after running custom code cells so you can interpret outputs.
-- After each successful MCP tool execution or custom code cell execution, add an interpretation markdown cell.
-- Keep the notebook clean and readable.
-- Do not use hidden scratchpads; put summaries and interpretations in markdown cells.
-- Never re-load the dataset after setup; always reuse the existing `adata` object.
-- If a custom tool is used, the tool execution counts as the step's main execution action.
-- A markdown cell inserted automatically by a tool does NOT replace the required Step N interpretation cell.
+* Always append cells with `index=None`.
+* Never reload the dataset; use the existing `adata`.
+* Keep the notebook clean and readable.
+* Do not use hidden scratchpads; put summaries and interpretations in markdown cells.
+* Complete at most {self.max_iterations} interpretation steps.
+* After Step {self.max_iterations}, write a final markdown summary and stop.
 
 Notebook already contains:
-- cell 0: hypothesis markdown
-- cell 1: setup code
-- initial analysis plan is inserted automatically only after setup finishes
+
+* cell 0: hypothesis markdown
+* cell 1: setup code
+* initial analysis plan is inserted automatically after setup.
 
 Hypothesis:
 {hypothesis}
@@ -1369,6 +1917,13 @@ Analysis plan:
 
 Context:
 adata summary: {self.adata_summary[:3000]}
+
+user context:
+{self.paper_summary[:3000]}
+
+coding guidelines:
+{self.coding_guidelines[:3000]}
+
 
 user context (dataset summary / past analyses / focus directions / biological background): {self.paper_summary[:3000]}
 
@@ -1670,6 +2225,8 @@ coding guidelines: {self.coding_guidelines[:3000]}
             "mcp__jupyter__restart_kernel",
             "mcp__jupyter__check_user_stop",
             "mcp__jupyter__run_qc_summary_template",
+            "mcp__jupyter__run_dimensional_reduction_summary_template",
+            "mcp__jupyter__run_compute_hvgs_template",
         ]
         if self.interactive_mode:
             allowed_tools.append("mcp__jupyter__pause_for_user_review")

@@ -8,7 +8,7 @@ set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\60k_cells_raw.h5ad"
 set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_raw_60k.txt"
 set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Analysis_sweep\logs\Claude\benchmarks"
-set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\claude_haiku_45_r1_unprocessed_newtool_analysis_1_plan.json"
+set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\benchmarks\claude_opus_48_r1_unprocessed_short_analysis_1_plan.json"
 set "output_dir=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\benchmarks"
 
 cd /d "%ROOT%"
