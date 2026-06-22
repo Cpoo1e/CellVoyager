@@ -9,11 +9,12 @@ def dimensional_reduction_summary(
     adata: Any,
     layer: str | None = None,
     use_hvgs: bool = True,
-    compute_hvgs_if_missing: bool = True,
     n_top_genes: int = 2000,
     n_pcs: int = 50,
     neighbors_n_pcs: int = 25,
     n_neighbors: int = 15,
+    run_pca: bool = True,
+    run_neighbors: bool = True,
     run_umap: bool = True,
     run_tsne: bool = False,
     run_leiden: bool = True,
@@ -49,7 +50,7 @@ def dimensional_reduction_summary(
     """
 
     warnings: list[str] = []
-    n_hvgs = None
+    n_hvgs = 0
 
     if layer is not None and layer not in adata.layers:
         return adata, {
@@ -83,103 +84,84 @@ def dimensional_reduction_summary(
 
     has_hvgs = "highly_variable" in adata.var.columns
 
-    if use_hvgs:
-        if has_hvgs:
-            steps_skipped.append("compute_hvgs")
-            n_hvgs = int(adata.var["highly_variable"].sum())
-        elif compute_hvgs_if_missing:
-            try:
-                sc.pp.highly_variable_genes(
-                    adata,
-                    n_top_genes=n_top_genes,
-                    flavor="seurat",
-                    layer=layer,
-                    inplace=True,
-                )
-                steps_run.append("compute_hvgs")
-                n_hvgs = int(adata.var["highly_variable"].sum())
-            except Exception as e:
-                warnings.append(f"Failed to compute highly variable genes: {str(e)}")
+    if has_hvgs:
+        n_hvgs = int(adata.var["highly_variable"].fillna(False).astype(bool).sum())
+    else:
+        n_hvgs = 0
+
+    if use_hvgs and has_hvgs and n_hvgs > 0:
+        n_features_for_pca = n_hvgs
+        use_highly_variable_for_pca = True
+    else:
+        n_features_for_pca = int(adata.n_vars)
+        use_highly_variable_for_pca = False
+
+    if run_pca:
+        safe_n_pcs = min(n_pcs, adata.n_obs - 1, n_features_for_pca - 1)
+
+        if safe_n_pcs < n_pcs:
+            warnings.append(
+                f"Requested n_pcs={n_pcs}, but only {safe_n_pcs} PCs can safely be calculated "
+                f"from this dataset."
+            )
+
+        safe_neighbors_n_pcs = min(neighbors_n_pcs, safe_n_pcs)
+
+        if "X_pca" in adata.obsm and "pca" in adata.uns and not force:
+            steps_skipped.append(
+                "PCA skipped because X_pca and pca metadata already exist."
+            )
 
         else:
-            warnings.append(
-                "Highly variable genes are missing and compute_hvgs_if_missing is False. "
-                "Dimensional reduction will proceed without HVGs."
-            )
-            has_hvgs = False
-
-    if use_hvgs and has_hvgs:
-        n_features_for_pca = n_hvgs
-        use_hilghly_variable_pca = True
-
-    else:
-        n_features_for_pca = adata.n_vars
-        use_hilghly_variable_pca = False
-
-    safe_n_pcs = min(n_pcs, adata.n_obs - 1, n_features_for_pca - 1)
-
-    if safe_n_pcs < n_pcs:
-        warnings.append(
-            f"Requested n_pcs={n_pcs}, but only {safe_n_pcs} PCs can safely be calculated "
-            f"from this dataset."
-        )
-
-    safe_neighbors_n_pcs = min(neighbors_n_pcs, safe_n_pcs)
-
-    if "X_pca" in adata.obsm and "pca" in adata.uns and not force:
-        steps_skipped.append(
-            "PCA skipped because X_pca and pca metadata already exist."
-        )
-
-    else:
-        try:
-            sc.tl.pca(
-                adata,
-                n_comps=safe_n_pcs,
-                use_highly_variable=use_hilghly_variable_pca,
-                svd_solver="arpack",
-                layer=layer,
-            )
-            steps_run.append("PCA")
-
-        except Exception:
-            if layer is not None:
-                warnings.append(
-                    "This Scanpy version may not support the layer argument in sc.tl.pca. "
-                    "Falling back to adata.X for PCA."
+            try:
+                sc.tl.pca(
+                    adata,
+                    n_comps=safe_n_pcs,
+                    use_highly_variable=use_highly_variable_for_pca,
+                    svd_solver="arpack",
+                    layer=layer,
                 )
+                steps_run.append("PCA")
 
-            sc.tl.pca(
-                adata,
-                n_comps=safe_n_pcs,
-                use_highly_variable=use_highly_variable_for_pca,
-                svd_solver="arpack",
+            except Exception:
+                if layer is not None:
+                    warnings.append(
+                        "This Scanpy version may not support the layer argument in sc.tl.pca. "
+                        "Falling back to adata.X for PCA."
+                    )
+
+                sc.tl.pca(
+                    adata,
+                    n_comps=safe_n_pcs,
+                    use_highly_variable=use_highly_variable_for_pca,
+                    svd_solver="arpack",
+                )
+                steps_run.append("pca")
+
+    if run_neighbors:
+        if "neighbors" in adata.uns and not force:
+            steps_skipped.append(
+                "Neighbors skipped because neighbors already exist in adata.uns."
             )
-            steps_run.append("pca")
 
-    if "neighbors" in adata.uns and not force:
-        steps_skipped.append(
-            "Neighbors skipped because neighbors already exist in adata.uns."
-        )
+        else:
+            try:
+                sc.pp.neighbors(
+                    adata,
+                    n_neighbors=n_neighbors,
+                    n_pcs=safe_neighbors_n_pcs,
+                    use_rep="X_pca",
+                )
+                steps_run.append("neighbors")
 
-    else:
-        try:
-            sc.pp.neighbors(
-                adata,
-                n_neighbors=n_neighbors,
-                n_pcs=safe_neighbors_n_pcs,
-                use_rep="X_pca",
-            )
-            steps_run.append("neighbors")
-
-        except Exception as exc:
-            return adata, {
-                "status": "failed",
-                "message": f"Neighbour graph construction failed: {exc}",
-                "warnings": warnings,
-                "processing_state_before": processing_state_before,
-                "results": {},
-            }
+            except Exception as exc:
+                return adata, {
+                    "status": "failed",
+                    "message": f"Neighbour graph construction failed: {exc}",
+                    "warnings": warnings,
+                    "processing_state_before": processing_state_before,
+                    "results": {},
+                }
 
     if run_umap:
         if "X_umap" in adata.obsm and not force:
@@ -269,7 +251,7 @@ def dimensional_reduction_summary(
         f"Cells: {adata.n_obs}\n"
         f"Genes: {adata.n_vars}\n"
         f"Layer used: {layer if layer is not None else 'adata.X'}\n"
-        f"HVGs used for PCA: {use_hilghly_variable_pca}\n"
+        f"HVGs used for PCA: {use_highly_variable_for_pca}\n"
         f"Number of HVGs: {results['n_hvgs']}\n"
         f"PCs calculated/used: {safe_n_pcs}\n"
         f"PCs used for neighbours: {safe_neighbors_n_pcs}\n"
