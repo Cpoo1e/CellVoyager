@@ -612,6 +612,169 @@ def run_mcp_server() -> None:
         session.restart_kernel()
         return {"ok": True, "notebook_path": str(session.path)}
 
+    @mcp.tool()
+    def run_qc_summary_template(
+        step_number: int,
+        reason: str = "",
+        groupby: list[str] | None = None,
+        apply_filters: bool = False,
+        apply_normalization: bool = False,
+        apply_log1p: bool = False,
+        apply_scaling: bool = False,
+        min_genes: int = 200,
+        min_counts: int = 500,
+        max_counts: int = 50000,
+        max_mito_pct: float | None = None,
+        min_cell_per_gene: int = 3,
+    ) -> dict[str, Any]:
+        """
+        Run the predefined CellVoyager QC summary/preprocessing template.
+
+        Use this instead of writing custom code when the step requires standard
+        QC metrics, grouped QC summaries, optional filtering, normalization,
+        log1p transformation, or scaling.
+        """
+
+        session = REGISTRY.require_current()
+
+        paused_by_user, user_feedback = _force_gui_pause_if_requested(session)
+        if paused_by_user:
+            return _paused_ack(user_feedback)
+
+        if groupby is None:
+            groupby = []
+
+        result_key = f"qc_summary_step_{step_number}_{int(time.time())}"
+        result_path = (
+            session.path.parent / "cellvoyager_tool_results" / f"{result_key}.json"
+        )
+
+        source = f"""# CellVoyager template call: QC summary / preprocessing
+qc_result = cv_run_qc_summary(
+    key={result_key!r},
+    groupby={groupby!r},
+    apply_filters={apply_filters!r},
+    apply_normalization={apply_normalization!r},
+    apply_log1p={apply_log1p!r},
+    apply_scaling={apply_scaling!r},
+    min_genes={min_genes!r},
+    min_counts={min_counts!r},
+    max_counts={max_counts!r},
+    max_mito_pct={max_mito_pct!r},
+    min_cell_per_gene={min_cell_per_gene!r},
+)
+"""
+
+        executed = session.insert_execute_code_cell(index=None, source=source)
+
+        if not executed.get("ok"):
+            error = executed.get("error", "Unknown error")
+
+            summary_md = f"""## Step {step_number} — QC template failed
+
+The predefined QC summary template was selected because: {reason}
+
+The tool failed, so the agent should either fix the issue or continue with custom code.
+
+```text
+{error}
+```
+"""
+
+            return {
+                "ok": False,
+                "tool": "run_qc_summary_template",
+                "result_key": result_key,
+                "error": error,
+                "summary_md": summary_md,
+            }
+
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except Exception:
+            result = {
+                "status": "unknown",
+                "message": executed.get("output_preview", "")[:1000],
+                "warnings": ["Could not read structured result JSON."],
+                "filter_log": {},
+                "preprocessing_log": {},
+                "processing_state": {},
+                "steps_run": [],
+                "steps_skipped": [],
+            }
+
+        filter_log = result.get("filter_log", {})
+        preprocessing_log = result.get("preprocessing_log", {})
+        processing_state = result.get("processing_state", {})
+        warnings_list = result.get("warnings", [])
+        steps_run = result.get("steps_run", [])
+        steps_skipped = result.get("steps_skipped", [])
+
+        warning_text = ""
+        if warnings_list:
+            warning_text = "\n\n**Warnings:**\n" + "\n".join(
+                f"- {warning}" for warning in warnings_list
+            )
+
+        summary_md = f"""## Step {step_number} — Tool summary: QC summary template
+
+The predefined QC summary/preprocessing template was used instead of writing new custom code.
+
+**Reason selected:** {reason}
+
+**Tool status:** `{result.get("status", "unknown")}`
+
+| Metric | Value |
+|---|---:|
+| Cells before | {filter_log.get("cells_before", "NA")} |
+| Cells after | {filter_log.get("cells_after", "NA")} |
+| Genes before | {filter_log.get("genes_before", "NA")} |
+| Genes after | {filter_log.get("genes_after", "NA")} |
+| Filtering applied | {result.get("filter_applied", "NA")} |
+| Mitochondrial genes detected | {processing_state.get("n_mito_genes", "NA")} |
+| Normalization applied | {preprocessing_log.get("normalization_applied", "NA")} |
+| Log1p applied | {preprocessing_log.get("log1p_applied", "NA")} |
+| Scaling applied | {preprocessing_log.get("scaling_applied", "NA")} |
+
+**Steps run:** {", ".join(steps_run) if steps_run else "None"}  
+**Steps skipped:** {", ".join(steps_skipped) if steps_skipped else "None"}
+
+{warning_text}
+
+The full result is stored for later steps in:
+
+```python
+cv_tool_results["{result_key}"]
+adata.uns["cellvoyager_tool_results"]["{result_key}"]
+```
+
+A JSON copy was saved to:
+
+```text
+{result_path}
+```
+
+Later steps should use the current live `adata` object.
+"""
+
+        return {
+            "ok": True,
+            "tool": "run_qc_summary_template",
+            "result_key": result_key,
+            "summary": result.get("message", "")[:1000],
+            "summary_md": summary_md,
+            "stored_result_path": str(result_path),
+            "compact_result": {
+                "status": result.get("status"),
+                "warnings": warnings_list,
+                "filter_applied": result.get("filter_applied"),
+                "filter_log": filter_log,
+                "preprocessing_log": preprocessing_log,
+                "steps_run": steps_run,
+                "steps_skipped": steps_skipped,
+            },
+        }
+
     if os.environ.get("CELLVOYAGER_INTERACTIVE_MODE") == "1":
         output_dir = Path(os.environ.get("CELLVOYAGER_INTERACTIVE_OUTPUT_DIR", "."))
         request_path = output_dir / _PAUSE_REQUEST_FILE
@@ -975,15 +1138,62 @@ class CellVoyagerClaudeRunner:
             new_markdown_cell(f"# Analysis\n\n**Hypothesis**: {hypothesis}")
         )
 
+        project_root = Path(__file__).resolve().parents[2]
+
         setup_code = f"""import scanpy as sc
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import json
+from pathlib import Path
+import sys
+
+project_root = Path(r'''{project_root}''')
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from cellvoyager.blocks.qc import qc_summary
 
 print("Loading data...")
 adata = sc.read_h5ad(r'''{self.h5ad_path}''')
-print(f"Loaded: {{adata.n_obs}} cells x {{adata.n_vars}} genes")
+print("Loaded:", adata.n_obs, "cells x", adata.n_vars, "genes")
+
+cv_tool_results = {{}}
+
+def cv_save_tool_result(key, result):
+    cv_tool_results[key] = result
+
+    if "cellvoyager_tool_results" not in adata.uns:
+        adata.uns["cellvoyager_tool_results"] = {{}}
+
+    adata.uns["cellvoyager_tool_results"][key] = result
+
+    result_dir = Path("cellvoyager_tool_results")
+    result_dir.mkdir(exist_ok=True)
+
+    result_path = result_dir / (key + ".json")
+    result_path.write_text(
+        json.dumps(result, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+    return result_path
+
+
+def cv_run_qc_summary(key, **kwargs):
+    global adata
+
+    adata, result = qc_summary(
+        adata=adata,
+        **kwargs,
+    )
+
+    result_path = cv_save_tool_result(key, result)
+
+    print(f"QC summary completed.")
+
+    return result
 """
         nb.cells.append(new_code_cell(setup_code))
         # Defer rendering the plan cell until setup finishes so the UI order is clear.
@@ -1018,7 +1228,7 @@ INTERACTIVE MODE (GUI): The user gives feedback via the GUI. The user can also e
 - If pause_for_user_review returns user_feedback exactly "__FINISH__", the user has requested to finish early. Do NOT add any more code or analysis cells. Instead, add exactly one final markdown cell that concisely summarizes the key findings, visualizations, and conclusions from all analyses completed in the notebook so far, then stop immediately. Do not continue to the next analysis.
 - The tool blocks. The user edits the notebook and/or types feedback in the GUI, then clicks Continue.
 - When it returns, the tool provides user_feedback. You also get the updated notebook state (read_notebook to see changes).
-- CRITICAL: Preserve all existing cells. The insert_cell tool in GUI mode ONLY appends — never pass a numeric index. Your new cells will always go at the end. This preserves user-inserted cells in their positions.
+- CRITICAL: Preserve all existing cells. In GUI mode, always append new cells. Never pass a numeric index to `insert_cell` or `insert_execute_code_cell`; always use `index=None`. Your new cells must always go at the end. This preserves user-inserted cells in their positions.
 - Do NOT use delete_cell. Do NOT use overwrite_cell_source except to fix a code cell that YOU added and that failed to run — never overwrite cells the user may have added.
 - Incorporate user_feedback and any user edits into your next steps.
 - Do NOT add interpretation cells that merely summarize or repeat user-added code. User-added cells stay as-is; proceed with your next analysis step.
@@ -1035,7 +1245,7 @@ INTERACTIVE MODE (TERMINAL): The user provides feedback directly in the terminal
 - If pause_for_user_review returns user_feedback exactly "__FINISH__", the user has requested to finish early. Do NOT add any more code or analysis cells. Instead, add exactly one final markdown cell that concisely summarizes the key findings, visualizations, and conclusions from all analyses completed in the notebook so far, then stop immediately. Do not continue to the next analysis.
 - The tool blocks until the user enters feedback in the terminal. The user can also edit the notebook directly while paused. They press Enter to continue (with or without typed feedback).
 - When it returns, the tool provides user_feedback from the terminal. After resuming, call read_notebook to pick up any edits the user made to the notebook.
-- CRITICAL: Preserve all existing cells. Use insert_cell with index=None (append) so your new cells go at the end. Do NOT use delete_cell. Do NOT use overwrite_cell_source except to fix a code cell that YOU added and that failed to run.
+- CRITICAL: Preserve all existing cells. Always append new cells. Use insert_cell and insert_execute_code_cell with index=None so your new cells go at the end. Do NOT use delete_cell. Do NOT use overwrite_cell_source except to fix a code cell that YOU added and that failed to run.
 - Incorporate user_feedback and any user edits into your next steps. Proceed with the next step only after pause_for_user_review returns.
 
 """
@@ -1044,46 +1254,112 @@ INTERACTIVE MODE (TERMINAL): The user provides feedback directly in the terminal
 You are executing a single-cell transcriptomics analysis in a LIVE notebook.
 
 You have custom notebook tools. Use them directly.
-{interactive_block}
+
+CUSTOM MCP TOOLS AVAILABLE — IMPORTANT:
+
+1. `run_qc_summary_template`
+   Use this for standard preprocessing tasks, including:
+   - QC metric calculation
+   - mitochondrial gene identification
+   - grouped QC summaries
+   - cell/gene filtering
+   - normalization
+   - log1p transformation
+   - scaling
+
+   Individual actions can be enabled or disabled using the tool flags.
+
+CUSTOM TOOL CALLING RULES — IMPORTANT:
+
+Custom CellVoyager tools are MCP tools. They are NOT Python functions inside the notebook.
+
+Correct:
+- Call `run_qc_summary_template` directly as an MCP tool when doing QC, filtering, normalization, log1p transformation, or scaling.
+
+Incorrect:
+- Do NOT write `mcp__jupyter__run_qc_summary_template(...)` inside a notebook code cell.
+- Do NOT write `run_qc_summary_template(...)` inside a notebook code cell.
+- Do NOT write `cv_run_qc_summary(...)` manually unless the MCP tool has already failed and you are explicitly recovering.
+- Do NOT recreate Scanpy code for QC, filtering, normalization, log1p transformation, or scaling if `run_qc_summary_template` can do it.
+
+Before writing any custom Python code, ask:
+“Is this task covered by an MCP template tool?”
+
+If yes, call the MCP tool directly.
+
+If the MCP tool only completes part of the required step, call the tool first. Then add a separate minimal custom code cell after the tool-generated cell only for the unsupported part of the step, such as extra plotting or a specialised statistical test.
+
+If the MCP tool fails:
+1. Inspect the tool error.
+2. Retry the same MCP tool once with corrected arguments if the issue is fixable.
+3. Only fall back to custom Python code if the MCP tool cannot complete the task after a corrected retry.
+4. If falling back to custom code, briefly explain why the tool was insufficient.
 
 Required workflow:
-1. Call use_notebook with notebook_path="{notebook_path}" — this automatically runs the setup cell (loads AnnData ONCE per kernel session). Do NOT add or run step 1 until use_notebook returns successfully.
-2. Add the step 1 markdown summary cell and step 1 code cell (append to end), execute that new code cell, inspect with read_cell, then add a markdown interpretation cell (output summary + whether changing next steps + why).
-   - IMPORTANT: AnnData is already loaded in memory as `adata` by setup. Reuse that in step 1 and all later steps. Do NOT call sc.read_h5ad again.
-3. For every remaining step in the analysis plan:
-   - add a markdown summary cell in this format:
-     ## Step N summary - Short summary in header
-     
-     A more detailed 1-2 sentences explaining the motivation behind this step.
-     (Use the word "summary" in the header, e.g. "## Step 2 summary - Load and QC data")
-   - add a code cell implementing that step
-   - execute it
-   - inspect outputs with read_cell
-   - if it fails, fix that same code cell with overwrite_cell_source and re-run
-   - you may try at most 3 fixes for the same step
-   - if still failing after 3 fixes, abandon that step and move to a different useful step
-   - after every successful code execution, add a markdown interpretation cell (header like "## Step N — Interpretation: ...") that:
-     (a) interprets the output (figures and printed text): what do the results show?
-     (b) states whether you are changing the next steps or keeping the original plan
-     (c) explains why: if changing, why the results justify a different approach; if keeping, why the current plan still holds
-4. If the results suggest a better next step, update the plan in notebook markdown and continue.
-5. End with a final markdown summary of findings.
 
-CRITICAL — Step limit: You MUST complete the analysis in at most {self.max_iterations} interpretation steps (each step = one code cell + one interpretation markdown). Do NOT exceed this limit. Once you have reached step {self.max_iterations}, write your final summary and stop. Prioritize the most important steps if the plan is long.
+1. Call `use_notebook` with notebook_path="{notebook_path}" — this automatically runs the setup cell and loads AnnData once per kernel session. Do NOT add or run Step 1 until `use_notebook` returns successfully.
+
+2. For every step in the analysis plan:
+   - Add a markdown summary cell in this format:
+
+     ## Step N summary - Short summary in header
+
+     A more detailed 1-2 sentence explanation of the motivation behind this step.
+
+   - Decide whether an available custom MCP tool can complete the whole step or part of the step.
+   - If a custom MCP tool can complete the step, call that tool directly.
+   - If only part of the step is covered by a custom MCP tool, call the tool first, then add minimal custom code only for the unsupported part.
+   - Only if no available custom MCP tool can complete the required task should you add a custom code cell.
+   - Execute the selected MCP tool or custom code cell.
+   - Inspect the output using the returned tool result first. Use `read_cell` only if you need to inspect a notebook cell output.
+   - If a custom code cell fails, fix that same code cell with `overwrite_cell_source` and re-run it.
+   - You may try at most 3 fixes for the same custom code step.
+   - If still failing after 3 fixes, abandon that step and move to a different useful step.
+   - After every successful MCP tool execution or custom code execution, add a markdown interpretation cell with a header like:
+
+     ## Step N — Interpretation: Short interpretation title
+
+     The interpretation must:
+     (a) interpret the output, including figures, printed text, and tool summaries;
+     (b) state whether the next steps are changing or staying the same;
+     (c) explain why.
+
+3. If the results suggest a better next step, update the plan in notebook markdown and continue.
+
+4. End with a final markdown summary of findings.
+
+5. All future cells should be appended after the most recently added cell. Do not insert new cells above previous analysis cells.
+
+CRITICAL — Step limit:
+You MUST complete the analysis in at most {self.max_iterations} interpretation steps.
+
+Each step means one main execution action plus one interpretation markdown cell.
+The execution action can be either:
+- one MCP tool call, or
+- one custom code cell, or
+- one MCP tool call followed by minimal custom code only if the tool does not cover the full step.
+
+Do NOT exceed this limit. Once you have reached Step {self.max_iterations}, write your final summary and stop. Prioritize the most important steps if the plan is long.
 
 Critical behavior:
-- Actually execute code. Do not just describe what you would do.
-- Use read_cell after running code so you can interpret outputs.
-- After each code cell execution, add an interpretation markdown cell covering: what the output shows, whether you are adjusting your next steps, and why.
+- Actually execute the selected custom MCP tool or custom code. Do not just describe what you would do.
+- Use available custom MCP tools directly whenever they can complete the task.
+- Do not recreate tool functionality with custom Python code.
+- Custom tools are external notebook tools, not Python functions inside the notebook kernel.
+- Never write `mcp__jupyter__...` tool calls inside notebook code cells.
+- Use returned tool results after calling tools so you can interpret outputs.
+- Use `read_cell` after running custom code cells so you can interpret outputs.
+- After each successful MCP tool execution or custom code cell execution, add an interpretation markdown cell.
 - Keep the notebook clean and readable.
-- Do not use hidden scratchpads; put summaries/interpretations in markdown cells.
+- Do not use hidden scratchpads; put summaries and interpretations in markdown cells.
 - Never re-load the dataset after setup; always reuse the existing `adata` object.
+- If a custom tool is used, the tool execution counts as the step's main execution action.
+- A markdown cell inserted automatically by a tool does NOT replace the required Step N interpretation cell.
 
 Notebook already contains:
 - cell 0: hypothesis markdown
 - cell 1: setup code
 - initial analysis plan is inserted automatically only after setup finishes
-- Step 1 cells do not exist yet; create them only after setup has finished.
 
 Hypothesis:
 {hypothesis}
@@ -1091,18 +1367,12 @@ Hypothesis:
 Analysis plan:
 {plan_text}
 
-First step code template (insert this as your step 1 code, adapted to reuse existing `adata`):
-```python
-{first_step_code}
-```
-
 Context:
 adata summary: {self.adata_summary[:3000]}
 
 user context (dataset summary / past analyses / focus directions / biological background): {self.paper_summary[:3000]}
 
-coding guidelines: {self.coding_guidelines[:3000]}
-""".strip()
+coding guidelines: {self.coding_guidelines[:3000]}""".strip()
 
     def _log_stream_item(self, item: Any) -> None:
         """Logs:
@@ -1187,17 +1457,75 @@ coding guidelines: {self.coding_guidelines[:3000]}
 You are EXTENDING a completed single-cell analysis with additional steps. The notebook already exists.
 
 Your tasks:
-1. Call use_notebook with notebook_path="{notebook_path}" — this runs the setup cell (loads AnnData)
-2. Before EVERY tool call, call check_user_stop. If pause_requested: true, call pause_for_user_review immediately.
-3. Execute EVERY existing code cell in order to restore kernel state (skip markdown cells)
+
+1. Call use_notebook with notebook_path="{notebook_path}" — this runs the setup cell and loads AnnData.
+2. Before EVERY tool call except check_user_stop and pause_for_user_review, call check_user_stop. If stop_requested: true, stop immediately. If pause_requested: true, call pause_for_user_review immediately.
+3. Execute EVERY existing code cell in order to restore kernel state, skipping markdown cells.
 4. After restoring kernel state, ACTIVELY ADD NEW analysis steps — the user has asked you to extend this analysis further.
 5. Add meaningful new analyses, visualizations, or investigations that build on the existing work.
 6. After EVERY interpretation cell you add, call pause_for_user_review to let the user review and give feedback.
 7. If pause_for_user_review returns user_feedback exactly "__STOP__", stop immediately.
 8. If pause_for_user_review returns user_feedback exactly "__FINISH__", add one final summary markdown cell then stop.
 
-CRITICAL: You must add new cells and new analyses. Only append (insert_cell with index=None). Do NOT delete or overwrite existing cells. Do NOT call sc.read_h5ad again (adata is already loaded).{feedback_line}
-""".strip()
+Tool-first rule:
+
+* Use available custom CellVoyager tools whenever they can complete the step, or the relevant standard part of the step.
+* Only write custom Python code when the available tools cannot complete the required analysis, cannot answer the hypothesis, or cannot perform the needed specialised downstream analysis.
+* Available custom tools are external notebook tools, not Python functions inside the notebook kernel.
+* To use a custom tool, call it directly as a tool. Do NOT write tool calls such as `mcp__jupyter__run_qc_summary_template(...)` inside notebook code cells.
+* If a custom tool can complete the step, call the tool directly. The tool may insert and execute its own notebook code cell.
+* Do not manually recreate the same code cell unless the tool is genuinely unable to complete the analysis.
+* If a custom tool fails, first inspect whether the failure is due to a fixable precondition, such as a missing AnnData layer, missing metadata column, or missing setup variable. If the precondition can be fixed safely, fix it and retry the tool. Only fall back to custom code if the tool is genuinely unable to complete the required analysis.
+* If you write custom code instead of using an available tool, briefly explain in the step summary or interpretation why the tool was insufficient.
+
+Available tools:
+
+* `run_qc_summary_template`: use this for standard QC metrics, grouped QC summaries, optional filtering, normalization, log1p transformation, or scaling.
+
+Workflow for each new step:
+
+* Add a markdown summary cell in this format:
+
+  ## Step N summary - Short summary in header
+
+  A more detailed 1-2 sentences explaining the motivation behind this step.
+
+* Perform the step using an available custom tool if one can complete the task, or the relevant standard part of the task.
+
+* Only add a custom code cell if no available tool can adequately complete that part of the analysis.
+
+* If custom code is required, append it using insert_cell or insert_execute_code_cell with index=None.
+
+* Execute the selected tool or custom code.
+
+* Inspect outputs with read_cell and/or the returned tool result.
+
+* After every successful tool execution or code execution, add a markdown interpretation cell with a header like:
+
+  ## Step N — Interpretation: Short interpretation title
+
+  The interpretation must explain:
+  (a) what the output shows;
+  (b) whether the next steps are changing or staying the same;
+  (c) why.
+
+CRITICAL:
+
+* You must add new cells and new analyses.
+* Only append new cells. Use insert_cell and insert_execute_code_cell with index=None.
+* Do NOT pass numeric indices.
+* Do NOT delete or overwrite existing cells.
+* Do NOT call sc.read_h5ad again; adata is already loaded.
+* Do NOT use delete_cell.
+* Only use overwrite_cell_source to fix a code cell YOU just added that failed to run — never overwrite cells the user may have added.
+
+CRITICAL — Step limit:
+
+* Complete at most {self.max_iterations} NEW interpretation steps.
+* Once you reach {self.max_iterations} new steps, write a final summary markdown and stop.
+  {feedback_line}
+  """.strip()
+
         feedback_section = (
             f"\n\nThe user has provided the following feedback to guide your continuation:\n{user_feedback}"
             if user_feedback
@@ -1207,48 +1535,98 @@ CRITICAL: You must add new cells and new analyses. Only append (insert_cell with
 You are RESUMING a completed single-cell analysis. The notebook already exists with all cells.
 
 Phase 1 — Restore kernel state:
-1. Call use_notebook with notebook_path="{notebook_path}" — this automatically runs the setup cell (loads AnnData)
-2. Before EVERY tool call, call check_user_stop. If pause_requested: true, call pause_for_user_review immediately.
-3. Execute EVERY remaining code cell in the notebook (skip markdown cells) in order to restore kernel state.
+
+1. Call use_notebook with notebook_path="{notebook_path}" — this automatically runs the setup cell and loads AnnData.
+2. Before EVERY tool call except check_user_stop and pause_for_user_review, call check_user_stop. If stop_requested: true, stop immediately. If pause_requested: true, call pause_for_user_review immediately.
+3. Execute EVERY remaining code cell in the notebook in order to restore kernel state, skipping markdown cells.
 4. After all code cells are executed, call pause_for_user_review to let the user review the notebook.
 
-Phase 2 — Interactive extension (after the user clicks Continue):
+Phase 2 — Interactive extension after the user clicks Continue:
 INTERACTIVE MODE (GUI): The user gives feedback via the GUI. The user can also edit the notebook in the GUI.
-- Before each new step AND before every tool call, call check_user_stop. If stop_requested: true, do NOT add any more steps; stop immediately. If pause_requested: true, call pause_for_user_review immediately (do nothing else first).
-- If execute_cell or insert_execute_code_cell returns paused_by_user: true, call pause_for_user_review immediately.
-- After EVERY interpretation cell you add, you MUST call pause_for_user_review.
-- If pause_for_user_review returns user_feedback exactly "__STOP__", stop immediately.
-- If pause_for_user_review returns user_feedback exactly "__FINISH__", add one final summary markdown cell then stop.
-- The tool blocks. The user edits the notebook and/or types feedback in the GUI, then clicks Continue.
-- When it returns, the tool provides user_feedback. You also get the updated notebook state (read_notebook to see changes).
-- Incorporate user_feedback and any user edits into your next steps.
-- Proceed with the next step only after pause_for_user_review returns.
+
+* Before each new step AND before every tool call except check_user_stop and pause_for_user_review, call check_user_stop. If stop_requested: true, do NOT add any more steps; stop immediately. If pause_requested: true, call pause_for_user_review immediately.
+* If execute_cell or insert_execute_code_cell returns paused_by_user: true, call pause_for_user_review immediately.
+* After EVERY interpretation cell you add, you MUST call pause_for_user_review.
+* If pause_for_user_review returns user_feedback exactly "__STOP__", stop immediately.
+* If pause_for_user_review returns user_feedback exactly "__FINISH__", add one final summary markdown cell then stop.
+* The tool blocks. The user edits the notebook and/or types feedback in the GUI, then clicks Continue.
+* When it returns, the tool provides user_feedback. You also get the updated notebook state. Use read_notebook to see changes.
+* Incorporate user_feedback and any user edits into your next steps.
+* Proceed with the next step only after pause_for_user_review returns.
+
+Tool-first rule:
+
+* Use available custom CellVoyager tools whenever they can complete the step, or the relevant standard part of the step.
+* Only write custom Python code when the available tools cannot complete the required analysis, cannot answer the hypothesis, or cannot perform the needed specialised downstream analysis.
+* Available custom tools are external notebook tools, not Python functions inside the notebook kernel.
+* To use a custom tool, call it directly as a tool. Do NOT write tool calls such as `mcp__jupyter__run_qc_summary_template(...)` inside notebook code cells.
+* If a custom tool can complete the step, call the tool directly. The tool may insert and execute its own notebook code cell.
+* Do not manually recreate the same code cell unless the tool is genuinely unable to complete the analysis.
+* If a custom tool fails, first inspect whether the failure is due to a fixable precondition, such as a missing AnnData layer, missing metadata column, or missing setup variable. If the precondition can be fixed safely, fix it and retry the tool. Only fall back to custom code if the tool is genuinely unable to complete the required analysis.
+* If you write custom code instead of using an available tool, briefly explain in the step summary or interpretation why the tool was insufficient.
+
+Available tools:
+
+* `run_qc_summary_template`: use this for standard QC metrics, grouped QC summaries, optional filtering, normalization, log1p transformation, or scaling.
 
 Required workflow for each new step:
-- Add a markdown summary cell in this format:
+
+* Add a markdown summary cell in this format:
+
   ## Step N summary - Short summary in header
 
   A more detailed 1-2 sentences explaining the motivation behind this step.
-  (Use the word "summary" in the header, e.g. "## Step 5 summary - Differential expression")
-- Add a code cell implementing that step (insert_cell with index=None to append)
-- Execute it, then inspect outputs with read_cell
-- If it fails, fix with overwrite_cell_source and re-run (up to 3 attempts for the same step)
-- If still failing after 3 fixes, abandon that step and move to a different useful step
-- After every successful code execution, add a markdown interpretation cell (header like "## Step N — Interpretation: ...") that:
-  (a) interprets the output: what do the results show?
-  (b) states whether you are changing the next steps or keeping the plan
-  (c) explains why
+  Use the word "summary" in the header, e.g. "## Step 5 summary - Differential expression".
 
-CRITICAL — Step limit: Complete at most {self.max_iterations} NEW interpretation steps. Once you reach {self.max_iterations} new steps, write a final summary markdown and stop.
+* Before adding custom Python code, decide whether an available custom tool can complete the step, or the relevant standard part of the step.
 
-CRITICAL: Only append new cells (insert_cell with index=None). Do NOT delete or overwrite existing cells. Do NOT call sc.read_h5ad again (adata is already loaded). Do NOT use delete_cell. Only use overwrite_cell_source to fix a code cell YOU just added that failed to run — never overwrite cells the user may have added.
+* Perform the step using an available custom tool if one can complete the task.
+
+* Only add a custom code cell if no available tool can adequately complete that part of the analysis.
+
+* If custom code is required, append it using insert_cell or insert_execute_code_cell with index=None.
+
+* Execute the selected tool or custom code.
+
+* Inspect outputs with read_cell and/or the returned tool result.
+
+* If a custom code cell fails, fix that same code cell with overwrite_cell_source and re-run.
+
+* You may try at most 3 fixes for the same custom code step.
+
+* If still failing after 3 fixes, abandon that step and move to a different useful step.
+
+* After every successful tool execution or code execution, add a markdown interpretation cell with a header like:
+
+  ## Step N — Interpretation: Short interpretation title
+
+  The interpretation must:
+  (a) interpret the output, including figures, printed text, and tool summaries;
+  (b) state whether you are changing the next steps or keeping the plan;
+  (c) explain why.
+
+CRITICAL — Step limit:
+
+* Complete at most {self.max_iterations} NEW interpretation steps.
+* Once you reach {self.max_iterations} new steps, write a final summary markdown and stop.
+
+CRITICAL:
+
+* Only append new cells.
+* Use insert_cell and insert_execute_code_cell with index=None.
+* Do NOT pass numeric indices.
+* Do NOT delete or overwrite existing cells.
+* Do NOT call sc.read_h5ad again; adata is already loaded.
+* Do NOT use delete_cell.
+* Only use overwrite_cell_source to fix a code cell YOU just added that failed to run — never overwrite cells the user may have added.
 
 Context:
 adata summary: {self.adata_summary[:3000]}
 
 user context (dataset summary / past analyses / focus directions / biological background): {self.paper_summary[:3000]}
 
-coding guidelines: {self.coding_guidelines[:3000]}{feedback_section}
+coding guidelines: {self.coding_guidelines[:3000]}
+{feedback_section}
 """.strip()
 
     def execute_idea(self, analysis: dict[str, Any], analysis_idx: int = 0) -> str:
@@ -1291,6 +1669,7 @@ coding guidelines: {self.coding_guidelines[:3000]}{feedback_section}
             "mcp__jupyter__insert_execute_code_cell",
             "mcp__jupyter__restart_kernel",
             "mcp__jupyter__check_user_stop",
+            "mcp__jupyter__run_qc_summary_template",
         ]
         if self.interactive_mode:
             allowed_tools.append("mcp__jupyter__pause_for_user_review")
@@ -1554,6 +1933,7 @@ class ClaudeJupyterExecutor(CellVoyagerClaudeRunner):
             "mcp__jupyter__restart_kernel",
             "mcp__jupyter__check_user_stop",
             "mcp__jupyter__pause_for_user_review",
+            "mcp__jupyter__run_qc_summary_template",
         ]
 
         options = ClaudeAgentOptions(
