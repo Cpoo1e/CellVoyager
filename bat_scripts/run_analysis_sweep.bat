@@ -25,9 +25,9 @@ REM -------- Cloud models --------
 @REM call :RUN_CLOUD "gpt-5.5" "gpt55"
 
 REM -------- Claude models --------
-call :RUN_CLAUDE "anthropic/claude-haiku-4-5-20251001" "claude-haiku-4-5-20251001" "claude_haiku_45"
-call :RUN_CLAUDE "anthropic/claude-sonnet-4-6" "claude-sonnet-4-6" "claude_sonnet_46"
-call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-opus-4-8" "claude_opus_48"
+call :RUN_CLAUDE "anthropic/claude-sonnet-4-6" "claude-haiku-4-5-20251001" "claude_haiku_45"
+@REM call :RUN_CLAUDE "anthropic/claude-sonnet-4-6" "claude-sonnet-4-6" "claude_sonnet_46"
+@REM call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-opus-4-8" "claude_opus_48"
 
 
 pause
@@ -97,10 +97,9 @@ for /L %%R in (1,1,%REPEATS%) do (
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
       --output-dir "%output_dir%" ^
-      --analysis-name "%NAME%_r%%R_unprocessed" ^
+      --analysis-name "%NAME%_r%%R_reasoning_opus" ^
       --execution-mode claude ^
       --model-name "%MODEL%" ^
-      --from-analysis-json "%ANALYSIS_JSON%" ^
       --execution-model "%execution_model%" ^
       --log-home "%LOGS%" ^
       --log-prompts ^

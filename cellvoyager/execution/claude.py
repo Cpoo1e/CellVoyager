@@ -54,6 +54,7 @@ def _insert_default_plot(
     make_plot: bool = True,
     leiden_key: str = "leiden",
     colour_by: list[str] | None = None,
+    out_key: str | None = None,
 ) -> dict[str, Any]:
     """Insert and execute a short default plot cell for a CellVoyager MCP tool."""
 
@@ -156,6 +157,48 @@ elif "X_pca" in adata.obsm:
     plt.show()
 else:
     print("No UMAP or PCA embedding found in adata.obsm.")
+"""
+    elif plot_type == "annotate_cells":
+        source = f"""# CellVoyager default cell annotation plot for Step {step_number}
+import matplotlib.pyplot as plt
+import scanpy as sc
+
+cluster_key = {leiden_key!r}
+out_key = {out_key!r}
+markers_key = out_key + "_markers_present"
+
+markers = adata.uns.get(markers_key, None)
+
+colors = []
+if cluster_key in adata.obs.columns:
+    colors.append(cluster_key)
+if out_key in adata.obs.columns:
+    colors.append(out_key)
+
+if "X_umap" in adata.obsm and colors:
+    sc.pl.umap(
+        adata,
+        color=colors,
+        legend_loc="on data",
+        show=True,
+    )
+else:
+    print("No UMAP found or no valid annotation columns to plot.")
+
+if markers is not None:
+    groupby_key = cluster_key if cluster_key in adata.obs.columns else out_key
+
+    sc.pl.dotplot(
+        adata,
+        var_names=markers,
+        groupby=groupby_key,
+        standard_scale="var",
+        cmap="coolwarm",
+        figsize=(16, 7),
+        show=True,
+    )
+else:
+    print("No marker dictionary found in adata.uns.")
 """
 
     else:
@@ -1326,6 +1369,188 @@ hvg_result = cv_run_hvgs(
             },
         }
 
+    @mcp.tool()
+    def run_annotate_cells_template(
+        step_number: int,
+        reason: str = "",
+        cluster_key: str = "leiden",
+        layer: str | None = "X_log1p",
+        out_key: str = "cell_type",
+        marker_genes: dict[str, list[str]] | None = None,
+        min_score: float = 0.2,
+        min_margin: float = 0.1,
+        make_plot: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Run the predefined CellVoyager annotate cells template.
+
+        Use this instead of writing custom code when the step requires standard
+        cell annotation.
+
+        Parameters:
+        - step_number: The current step number in the analysis plan.
+        - reason: A string explaining why the annotate cells template was selected.
+        - cluster_key: The key in adata.obs to use for clustering (default: "leiden_r05").
+        - layer: The data layer to use for annotation (default: "X_log1p
+        - out_key: The key to store cell type annotations in adata.obs (default: "cell_type").
+        - marker_genes: A dictionary mapping cell types to lists of marker genes (default:
+        None, which means use default marker genes).
+        - min_score: Minimum score threshold for assigning a cell type (default: 0.
+        - min_margin: Minimum margin threshold for assigning a cell type (default: 0.05).
+        - make_plot: Whether to generate a default annotation plot after running the template (default: True).
+        """
+
+        session = REGISTRY.require_current()
+
+        paused_by_user, user_feedback = _force_gui_pause_if_requested(session)
+        if paused_by_user:
+            return _paused_ack(user_feedback)
+
+        result_key = f"annotate_cells_step_{step_number}_{int(time.time())}"
+        result_path = (
+            session.path.parent / "cellvoyager_tool_results" / f"{result_key}.json"
+        )
+
+        source = f"""# CellVoyager template call: annotate cells
+annotate_cells_result = cv_run_annotate_clusters_summary(
+    key={result_key!r},
+    cluster_key={cluster_key!r},
+    layer={layer!r},
+    out_key={out_key!r},
+    marker_genes={marker_genes!r},
+    min_score={min_score!r},
+    min_margin={min_margin!r},
+)
+    """
+
+        executed = session.insert_execute_code_cell(index=None, source=source)
+
+        if not executed.get("ok"):
+            error = executed.get("error", "Unknown error")
+
+            summary_md = f"""## Step {step_number} — Annotate cells template failed
+
+    The predefined annotate cells template was selected because: {reason}
+
+    The tool failed, so the agent should either fix the issue or continue with custom code.
+
+    ```text
+    {error}
+    ```
+    """
+
+            return {
+                "ok": False,
+                "tool": "run_annotate_cells_template",
+                "result_key": result_key,
+                "error": error,
+                "summary_md": summary_md,
+            }
+
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except Exception:
+            result = {
+                "status": "unknown",
+                "message": executed.get("output_preview", "")[:1000],
+                "warnings": ["Could not read structured result JSON."],
+                "results": {},
+                "processing_state_before": {},
+                "processing_state_after": {},
+                "steps_run": [],
+                "steps_skipped": [],
+            }
+
+        results = result.get("results", {})
+        processing_state_before = result.get("processing_state_before", {})
+        processing_state_after = result.get("processing_state_after", {})
+        warnings_list = result.get("warnings", [])
+        steps_run = result.get("steps_run", results.get("steps_run", []))
+        steps_skipped = result.get("steps_skipped", results.get("steps_skipped", []))
+
+        warning_text = ""
+        if warnings_list:
+            warning_text = "\n\n**Warnings:**\n" + "\n".join(
+                f"- {warning}" for warning in warnings_list
+            )
+
+        summary_md = f"""## Step {step_number} — Tool summary: Annotate cells template
+
+    The predefined annotate cells template was used instead of writing new custom code.
+
+    **Reason selected:** {reason}
+
+    **Tool status:** `{result.get("status", "unknown")}`
+
+    | Metric | Value |
+    |---|---:|
+    | Cells | {results.get("n_cells", "NA")} |
+    | Genes | {results.get("n_genes", "NA")} |
+    | Cluster key | {results.get("cluster_key", cluster_key)} |
+    | Layer used | {results.get("layer_used", "adata.X")} |
+    | Output key | {results.get("out_key", out_key)} |
+    | Marker genes | {results.get("marker_genes", marker_genes)} |
+    | Min score | {results.get("min_score", min_score)} |
+    | Min margin | {results.get("min_margin", min_margin)} |
+
+    **Steps run:** {", ".join(steps_run) if steps_run else "None"}  
+    **Steps skipped:** {", ".join(steps_skipped) if steps_skipped else "None"}
+
+    {warning_text}
+
+    The full result is stored for later steps in:
+
+    ```python
+    cv_tool_results["{result_key}"]
+    adata.uns["cellvoyager_tool_results"]["{result_key}"]
+    ```
+
+    A JSON copy was saved to:
+
+    ```text
+    {result_path}
+    ```
+
+    Later steps should use the current live `adata` object.
+    """
+
+        session.insert_cell(
+            index=None,
+            cell_type="markdown",
+            source=summary_md,
+        )
+
+        plot_result = _insert_default_plot(
+            session=session,
+            step_number=step_number,
+            plot_type="annotate_cells",
+            make_plot=make_plot,
+            leiden_key=cluster_key,
+            out_key=out_key,
+        )
+
+        return {
+            "ok": True,
+            "tool": "run_annotate_cells_template",
+            "result_key": result_key,
+            "summary": result.get("message", "")[:1000],
+            "summary_md": summary_md,
+            "stored_result_path": str(result_path),
+            "plot_created": plot_result["plot_created"],
+            "plot_cell_index": plot_result["plot_cell_index"],
+            "plot_output_preview": plot_result["plot_output_preview"],
+            "plot_error": plot_result.get("plot_error"),
+            "compact_result": {
+                "status": result.get("status"),
+                "warnings": warnings_list,
+                "results": results,
+                "processing_state_before": processing_state_before,
+                "processing_state_after": processing_state_after,
+                "steps_run": steps_run,
+                "steps_skipped": steps_skipped,
+            },
+        }
+
     if os.environ.get("CELLVOYAGER_INTERACTIVE_MODE") == "1":
         output_dir = Path(os.environ.get("CELLVOYAGER_INTERACTIVE_OUTPUT_DIR", "."))
         request_path = output_dir / _PAUSE_REQUEST_FILE
@@ -1646,12 +1871,13 @@ class CellVoyagerClaudeRunner:
         adata_summary: str = "",
         paper_summary: str = "",
         coding_guidelines: str = "",
-        max_turns: int = 40,
+        max_turns: int = 70,
         max_iterations: int = 8,
         analysis_name: str = "cellvoyager",
         interactive_mode: bool = False,
         intervene_every: int = 1,
         execution_model: str | None = None,
+        reasoning_model: str | None = None,
     ):
         self.output_dir = Path(output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1673,6 +1899,7 @@ class CellVoyagerClaudeRunner:
         if not self.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY is required")
         self.execution_model = execution_model or None
+        self.reasoning_model = "claude-opus-4-8"
 
     def _server_command(self) -> list[str]:
         return [sys.executable, str(Path(__file__).resolve()), "mcp-server"]
@@ -1707,6 +1934,7 @@ if str(project_root) not in sys.path:
 from cellvoyager.blocks.qc import qc_summary
 from cellvoyager.blocks.dimensional_reduction import dimensional_reduction_summary
 from cellvoyager.blocks.hvgs import compute_hvgs
+from cellvoyager.blocks.cell_annotation import annotate_clusters_summary
 
 print("Loading data...")
 adata = sc.read_h5ad(r'''{self.h5ad_path}''')
@@ -1773,6 +2001,21 @@ def cv_run_dimensionality_reduction_summary(key, **kwargs):
     print(f"Dimensionality reduction summary completed.")
 
     return result
+
+def cv_run_annotate_clusters_summary(key, **kwargs):
+    global adata
+
+    adata, result = annotate_clusters_summary(
+        adata=adata,
+        **kwargs,
+    )
+
+    result_path = cv_save_tool_result(key, result)
+
+    print("Cell annotation completed.")
+    print(result.get("message", ""))
+
+    return result
 """
         nb.cells.append(new_code_cell(setup_code))
         # Defer rendering the plan cell until setup finishes so the UI order is clear.
@@ -1836,78 +2079,192 @@ FIRST ACTION:
 Immediately call `mcp__jupyter__use_notebook` with notebook_path="{notebook_path}".
 Do not call ToolSearch. Do not describe the call first.
 
+You are the execution model. Your role is to operate the notebook using MCP tools and simple custom Python only when required.
+
+The specialist reasoning model is available through the Agent tool as `cellvoyager-reasoner`.
+
+Use the Agent tool only to call `cellvoyager-reasoner`.
+Do not use Agent for notebook execution.
+Do not use the general-purpose subagent.
+Do not use ToolSearch, Bash, Skill, Write, Edit, or MultiEdit.
+
+Notebook execution must be done only with the `mcp__jupyter__` tools.
+
+ALL CELLS SHOULD BE APPENDED TO THE END OF THE NOTEBOOK using:
+
+* `insert_cell(index=None, ...)`
+* `insert_execute_code_cell(index=None, ...)`
+
 AVAILABLE MCP TOOLS:
 
 * `mcp__jupyter__run_qc_summary_template`: QC metrics, filtering, normalization, log1p, scaling.
 * `mcp__jupyter__run_compute_hvgs_template`: highly variable gene selection.
-* `mcp__jupyter__run_dimensional_reduction_summary_template`: PCA, neighbour graph, UMAP, t-SNE, Leiden clustering. (Clustering should always be done on the log1p layer unless the hypothesis explicitly says otherwise)
+* `mcp__jupyter__run_dimensional_reduction_summary_template`: PCA, neighbour graph, UMAP, t-SNE, Leiden clustering. Clustering should normally use the log1p layer unless the hypothesis clearly says otherwise.
+* `mcp__jupyter__run_annotate_cells_template`: marker-based cell type annotation.
 * Notebook tools: `insert_cell`, `insert_execute_code_cell`, `read_cell`, `read_notebook`, `overwrite_cell_source`.
 
-TOOL-FIRST RULE:
-Use MCP tools directly whenever they cover the task.
-Never write MCP tool calls inside notebook code cells.
-Do not manually recreate QC, filtering, normalization, log1p, scaling, HVG selection, PCA, neighbours, UMAP, or Leiden if an MCP tool can do it.
-Only use custom Python for unsupported analysis, short plotting, specialised statistics, or fixing failed custom code. If custom code is used, it should include plotting and statistics, DO NOT SAVE ANY PLOTS
+GLOBAL HARD RULES:
 
-REQUIRED STRUCTURE FOR EVERY STEP:
-Each logical step must follow this exact order:
+* Use MCP tools directly whenever they cover the task.
+* Do not manually recreate QC, filtering, normalization, log1p, scaling, HVG selection, PCA, neighbours, UMAP, Leiden clustering, or cell annotation if an MCP tool can do it.
+* Only use custom Python for unsupported downstream biological analysis, specialised statistics, or short additional plotting.
+* If custom Python is needed, use one custom code cell per logical step.
+* Custom code should include the calculation, statistics, printed summary, tables, and plots where relevant.
+* Do not save plots to disk.
+* Never reload the dataset; use the existing live `adata`.
+* Do not use unsupported packages.
+* Do not add your own biological interpretation. Use the reasoning subagent for interpretation.
+* Keep the notebook clean and readable.
+* Attempt all steps in the analysis plan before stopping.
+* Be aware of processing cost and time, avoid large memory intensive opperations unless necessary.
+* Do not call ScheduleWakeup.
+* Do not defer execution.
+* If a code cell is long-running, wait for the MCP notebook tool to return.
 
-1. Markdown summary cell
-   Add with `insert_cell(index=None, cell_type="markdown", source=...)`.
+REQUIRED WORKFLOW FOR EACH LOGICAL STEP:
 
-   Header format:
-   `## Step N summary - Short summary`
+Each logical step must follow this exact order.
 
-   Include 1-2 sentences explaining the purpose of the step.
+## 1. Reasoning pre-step planning call
 
-2a. Execution sequence
-   Run the analysis for that step using:
+Before executing a step, call `cellvoyager-reasoner`.
 
-   * one MCP tool call; or
-   * one custom code cell; or
-   * multiple tightly related MCP/code actions if they are needed for the same logical step. 
+This pre-step call should ask the reasoning model to assess the next planned step before execution.
 
-2b. Tool Output Cell, If a tool is used, it will create an output summary for the user, this should be remembered as an existing cell and future steps should be appended after it
+Send the reasoner:
 
-2c. Tool Plotting Cell, If plotting is enabled, the tool will create a plotting cell for the user, this should be remembered as an existing cell and future steps should be appended after it
+* phase: `pre_step_plan`
+* overall hypothesis
+* full analysis plan
+* current step number
+* planned step text
+* current known `adata` state, if available
+* previous step result summary, if available
+* available MCP tools
+* hard constraints
 
-3. Markdown interpretation cell
-   Add with `insert_cell(index=None, cell_type="markdown", source=...)`.
+The reasoner must return one fenced JSON object only.
 
-   Header format:
-   `## Step N — Interpretation: Short title`
+The JSON should say:
 
-   Interpret both the analysis output and the plot. State whether the next steps are changing or staying the same, and why.
+* whether the planned step is appropriate
+* whether to continue, modify, skip, or stop
+* recommended MCP tool or `custom_python`
+* recommended tool arguments/flags
+* whether custom Python is needed
+* brief reason
+
+Use this JSON to decide exactly what to run.
+
+If the reasoner recommends something that violates the hard constraints, adapt it to the closest valid MCP tool or allowed Python method.
+
+## 2. Markdown step summary cell
+
+Insert a markdown cell before execution.
+
+Use:
+
+`insert_cell(index=None, cell_type="markdown", source=...)`
+
+Header format:
+
+`## Step N summary - Short summary`
+
+Include:
+
+* 1–2 sentences explaining the purpose of the step
+* the reasoner’s recommended action in one sentence
+* if you adapted the reasoner’s recommendation to satisfy hard constraints, briefly state the adaptation
+
+Do not include a full biological interpretation here.
+
+## 3. Execute the step
+
+Run the analysis using one of:
+
+* one MCP tool call
+* two MCP tool calls in sequence, only when both are required for the same logical step
+* one custom code cell, only if no MCP tool covers the task
+* MCP tool call(s) followed by one custom code cell, only if the MCP tool covers part of the step but not the full analysis
+
+MCP template tools insert their own tool-summary markdown cell and plot cell.
+Never insert, copy, or paraphrase a returned `summary_md` yourself.
+Treat it as already written to the notebook.
+
+Only one custom code cell is allowed per logical step.
+A second custom code cell is only allowed if the first custom code cell fails and must be fixed using `overwrite_cell_source`.
+If custom code is used, in addition to suggested code from the reasoning model, you should include plotting towards the end of the custom code cell to display results.
+
+If an MCP tool fails:
+
+* inspect the error
+* retry once with corrected arguments if the fix is obvious
+* only fall back to custom code if the tool cannot complete the task after a corrected retry
+
+If custom code fails:
+
+* fix that same cell with `overwrite_cell_source`
+* retry up to 3 times
+* then move on if the step is not recoverable
+
+## 4. Reasoning post-step interpretation and next-step planning call
+
+After the full logical step is complete, including:
+
+* execution
+* tool summary
+* plot cell
+* custom outputs, if any
+
+call `cellvoyager-reasoner` again.
+
+This post-step call should interpret the completed result and plan the next step.
+
+Send the reasoner:
+
+* phase: `post_step_review`
+* overall hypothesis
+* full analysis plan
+* completed step number
+* completed step title
+* what was executed
+* key tool summary values
+* key plots/output summary
+* warnings or errors
+* current `adata` state, if available
+* currently planned next step from the analysis plan
+
+The reasoner should return:
+
+1. Notebook-ready markdown interpretation
+2. A fenced JSON object giving next-step guidance
+
+After the reasoner returns:
+
+1. Insert only the markdown interpretation into the notebook using:
+   `insert_cell(index=None, cell_type="markdown", source=<markdown interpretation>)`
+
+2. Do not insert the JSON into the notebook.
+
+3. Use the JSON guidance to plan the next step.
+
+4. Do not call the reasoner again just to clarify imperfect JSON. If the JSON is imperfect, use the markdown recommendation and your own judgement while enforcing all hard constraints.
 
 IMPORTANT ORDERING RULES:
 
-* Do not add the interpretation cell until both the step execution, tool summary and the plotting cell are complete.
-* Do not add interpretation cells between actions within the same step.
-* Do not start a new step before writing the previous step interpretation.
-* A markdown cell inserted automatically by a tool does not replace the required Step N interpretation cell.
-* The step limit counts interpretation cells, not tool/code/plot cells.
-* Each new cell should be appended at the end of the notebook (index=None) to preserve user edits and inserted cells.
-
-ERROR HANDLING:
-
-* If an MCP tool fails, inspect the error and retry once with corrected arguments if the fix is obvious.
-* Only fall back to custom code if the tool cannot complete the task after a corrected retry.
-* If custom code fails, fix that same cell with `overwrite_cell_source`, retry up to 3 times, then move on.
-
-GLOBAL RULES:
-
-* Always append cells with `index=None`.
-* Never reload the dataset; use the existing `adata`.
-* Keep the notebook clean and readable.
-* Do not use hidden scratchpads; put summaries and interpretations in markdown cells.
-* Complete at most {self.max_iterations} interpretation steps.
-* After Step {self.max_iterations}, write a final markdown summary and stop.
+* Do not execute a step before the pre-step reasoning call.
+* Do not start a new step before writing the previous step’s reasoning interpretation.
+* Do not call the post-step reasoner until the whole logical step is complete.
+* Do not call the reasoner for plotting-only cells.
+* Do not call the reasoner for minor code fixes.
+* The step limit counts post-step interpretation cells, not tool/code/plot cells.
+* Each new cell must be appended at the end of the notebook with `index=None`.
 
 Notebook already contains:
 
 * cell 0: hypothesis markdown
 * cell 1: setup code
-* initial analysis plan is inserted automatically after setup.
+* initial analysis plan is inserted automatically after setup
 
 Hypothesis:
 {hypothesis}
@@ -1918,16 +2275,11 @@ Analysis plan:
 Context:
 adata summary: {self.adata_summary[:3000]}
 
-user context:
+user context dataset summary / past analyses / focus directions / biological background:
 {self.paper_summary[:3000]}
 
 coding guidelines:
-{self.coding_guidelines[:3000]}
-
-
-user context (dataset summary / past analyses / focus directions / biological background): {self.paper_summary[:3000]}
-
-coding guidelines: {self.coding_guidelines[:3000]}""".strip()
+{self.coding_guidelines[:3000]}""".strip()
 
     def _log_stream_item(self, item: Any) -> None:
         """Logs:
@@ -2188,7 +2540,12 @@ coding guidelines: {self.coding_guidelines[:3000]}
         """
         Returns the notebook path.
         """
-        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+        from claude_agent_sdk import (
+            AgentDefinition,
+            ClaudeAgentOptions,
+            ResultMessage,
+            query,
+        )
 
         notebook_path = self._write_initial_notebook(analysis, analysis_idx)
         prompt = self._build_prompt(analysis, notebook_path)
@@ -2214,6 +2571,7 @@ coding guidelines: {self.coding_guidelines[:3000]}
         }
 
         allowed_tools = [
+            "Agent",
             "mcp__jupyter__use_notebook",
             "mcp__jupyter__read_notebook",
             "mcp__jupyter__read_cell",
@@ -2227,15 +2585,218 @@ coding guidelines: {self.coding_guidelines[:3000]}
             "mcp__jupyter__run_qc_summary_template",
             "mcp__jupyter__run_dimensional_reduction_summary_template",
             "mcp__jupyter__run_compute_hvgs_template",
+            "mcp__jupyter__run_annotate_cells_template",
         ]
         if self.interactive_mode:
             allowed_tools.append("mcp__jupyter__pause_for_user_review")
 
+        reasoning_agents = {
+            "cellvoyager-reasoner": AgentDefinition(
+                description=(
+                    "Use after each completed CellVoyager notebook step to interpret "
+                    "single-cell analysis outputs, identify pipeline concerns, and recommend "
+                    "whether the next analysis step should change."
+                ),
+                prompt="""
+You are the CellVoyager reasoning subagent.
+
+You support a single-cell transcriptomics notebook execution agent.
+
+You may be called in two phases:
+
+1. `pre_step_plan`
+2. `post_step_review`
+
+You do not execute code.
+You do not call tools.
+You do not modify the notebook.
+You do not invent results that were not provided.
+You only reason from the hypothesis, analysis plan, provided summaries, tool outputs, warnings, errors, and plot descriptions.
+
+Hard constraints:
+
+* Keep the main analysis plan intact unless a change is clearly needed.
+* Prefer available MCP tools whenever they can complete the planned step.
+* Do not recommend unavailable packages or unsupported methods.
+* Do not recommend saving plots to disk.
+* Do not recommend reloading the dataset.
+* Do not recommend manually recreating QC, filtering, normalization, log1p, scaling, HVG selection, PCA, neighbours, UMAP, Leiden clustering, or marker-based annotation if an MCP tool exists for it.
+* Do not recommend `seurat_v3` HVG selection on `X_log1p`.
+* Do not describe sample-level mean-expression testing as true count-based pseudobulk unless raw counts are aggregated.
+* If using log-transformed data for HVG selection, recommend a log-compatible method.
+* If a planned step is valid, preserve it and recommend the simplest correct execution path.
+
+Available MCP tools:
+
+* `mcp__jupyter__run_qc_summary_template`
+* `mcp__jupyter__run_compute_hvgs_template`
+* `mcp__jupyter__run_dimensional_reduction_summary_template`
+* `mcp__jupyter__run_annotate_cells_template`
+
+General scientific validity constraints:
+    Preserve the intended biological question unless the current analysis plan is clearly flawed.
+    Before recommending a statistical test or comparison, identify the appropriate unit of comparison for the question.
+    Avoid treating technical observations as independent biological evidence when a higher-level biological replicate exists.
+    Use the data representation appropriate to the analysis goal. If the available data representation is uncertain, recommend checking it before making strong conclusions.
+    When a comparison involves repeated measures, matched samples, batches, donors, subjects, or timepoints, consider whether the analysis should preserve that structure.
+    Recommend multiple-testing correction when many features, groups, pathways, or cell types are tested.
+    Recommend checking sample balance and minimum group sizes before interpreting negative or positive results.
+    Treat annotation, clustering, and dimensionality reduction as aids for interpretation, not definitive biological truth.
+    Keep uncertain or ambiguous biological labels conservative.
+    Distinguish exploratory analyses from confirmatory/statistical analyses.
+    Do not overstate null results. Non-significance means no detected effect under the current analysis, not proof of no effect.
+    Do not make causal or mechanistic claims unless the analysis directly supports them.
+
+When phase is `pre_step_plan`:
+
+Return only one valid JSON object inside a fenced json block.
+
+Do not return markdown interpretation.
+
+The JSON must have this structure:
+
+```json
+{
+  "phase": "pre_step_plan",
+  "decision": "continue",
+  "planned_step_is_appropriate": true,
+  "step_title": "",
+  "recommended_action": "",
+  "recommended_tool": "",
+  "recommended_arguments": {eg. "marker_genes": {"monocytes": ["CD14", "LYZ", ....], "T_cells": ["CD3D", "CD3E", ...]}},
+  "custom_python_needed": false,
+  "custom_python_purpose": "",
+  "constraints": [],
+  "reasoning": ""
+}
+```
+
+Valid values for `decision`:
+
+* `continue`
+* `modify`
+* `skip`
+* `stop`
+
+Valid values for `recommended_tool`:
+
+* `mcp__jupyter__run_qc_summary_template`
+* `mcp__jupyter__run_compute_hvgs_template`
+* `mcp__jupyter__run_dimensional_reduction_summary_template`
+* `mcp__jupyter__run_annotate_cells_template`
+* `custom_python`
+* `none`
+
+For `recommended_arguments`, provide concrete tool arguments and flags.
+
+Examples:
+
+* For QC: include `apply_filters`, `apply_normalization`, `apply_log1p`, `groupby`, and relevant thresholds.
+* For HVGs: include `flavor`, `n_top_genes`, `layer`, `subset`, and `force`.
+* For dimensional reduction: include `layer`, `use_hvgs`, `n_pcs`, `neighbors_n_pcs`, `n_neighbors`, `run_umap`, `run_leiden`, `leiden_resolution`, `leiden_key`, and `force`.
+* For cell annotation: include `cluster_key`, `layer`, `out_key`, `marker_genes` if needed, `min_score`, and `min_margin`.
+
+When phase is `post_step_review`:
+
+Return exactly two parts.
+
+# Part 1 — Markdown interpretation cell
+
+Return notebook-ready markdown only.
+
+Use this structure:
+
+## Step N — Reasoning-model interpretation and next-step planning
+
+### Interpretation
+
+Briefly interpret the completed result in relation to the hypothesis.
+
+### Pipeline concerns
+
+Mention mistakes, limitations, confounding, warnings, failed tools, or biological uncertainty. If none are obvious, say so.
+
+### Recommendation for next step
+
+State whether to continue, modify, skip, or stop.
+
+Give the next recommended action in 1–3 concise bullet points.
+
+# Part 2 — JSON guidance for execution model
+
+Return one valid JSON object inside a fenced json block.
+
+The JSON must have this structure:
+
+```json
+{
+  "phase": "post_step_review",
+  "decision": "continue",
+  "next_step_title": "",
+  "next_step_should_change": false,
+  "recommended_tool": "",
+  "recommended_arguments": {},
+  "custom_python_needed": false,
+  "custom_python_purpose": "",
+  "constraints": [],
+  "reasoning": ""
+  "validity_checks": { "comparison_unit": "", "data_representation": "", "design_structure": "", "multiple_testing": "", "minimum_sample_check": "", "interpretation_limit": "" }
+}
+```
+
+Valid values for `decision`:
+
+* `continue`
+* `modify`
+* `skip`
+* `stop`
+
+Valid values for `recommended_tool`:
+
+* `mcp__jupyter__run_qc_summary_template`
+* `mcp__jupyter__run_compute_hvgs_template`
+* `mcp__jupyter__run_dimensional_reduction_summary_template`
+* `mcp__jupyter__run_annotate_cells_template`
+* `custom_python`
+* `none`
+
+validity_check Values:
+    comparison_unit: What unit should be compared, for example cells, clusters, samples, subjects, timepoints, or groups.
+    data_representation: What form of data is appropriate, for example raw counts, normalized values, log-transformed values, embeddings, proportions, or metadata.
+    design_structure: Any structure that should be preserved, such as pairing, batch, repeated measures, donor identity, or nested samples.
+    multiple_testing: Whether correction is needed.
+    minimum_sample_check: Whether the execution model should check group/sample size before interpreting results.
+    interpretation_limit: A short warning about how strongly the result can be interpreted.
+
+For reasoning, include specific guidance on how to carry out the step, this includes recomend adata layers, details about how to carry out correct statistics and areas to avoid.
+Imageine you are a senior bioinformatician guiding a junior analyst. Give them clear, specific, and actionable advice.
+
+JSON rules:
+
+* use double quotes
+* use true/false, not True/False
+* no comments
+* no trailing commas
+* no placeholder text""".strip(),
+                tools=[],
+                model=self.reasoning_model,
+                maxTurns=1,
+            )
+        }
+
         options = ClaudeAgentOptions(
             mcp_servers={"jupyter": mcp_config},
             cwd=str(self.output_dir),
-            permission_mode="bypassPermissions",
+            permission_mode="default",
             allowed_tools=allowed_tools,
+            disallowed_tools=[
+                "Bash",
+                "Skill",
+                "Write",
+                "Edit",
+                "MultiEdit",
+            ],
+            agents=reasoning_agents,
             include_partial_messages=True,
             max_turns=self.max_turns,
             **({"model": self.execution_model} if self.execution_model else {}),
@@ -2263,6 +2824,25 @@ coding guidelines: {self.coding_guidelines[:3000]}
 
             async for item in query(prompt=prompt_gen(), options=options):
                 self._log_stream_item(item)
+
+                if isinstance(item, ResultMessage):
+                    self.logger.log_json(
+                        "result_usage",
+                        {
+                            "total_cost_usd": item.total_cost_usd,
+                            "usage": item.usage,
+                            "model_usage": item.model_usage,
+                            "num_turns": item.num_turns,
+                            "session_id": item.session_id,
+                            "stop_reason": item.stop_reason,
+                            "is_error": item.is_error,
+                        },
+                    )
+
+                    print("\n=== Claude usage ===")
+                    print(f"Total cost: ${item.total_cost_usd}")
+                    print("Model usage:")
+                    print(json.dumps(item.model_usage, indent=2, default=str))
 
                 # ResultMessage contains cumulative usage for this query.
                 if isinstance(item, ResultMessage):
