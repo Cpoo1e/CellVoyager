@@ -66,6 +66,8 @@ def compute_hvgs(
 
     else:
         try:
+            # Do not overwrite adata with adata.X.
+            # Scanpy expects the full AnnData object here.
             sc.pp.highly_variable_genes(
                 adata,
                 flavor=flavor,
@@ -75,7 +77,12 @@ def compute_hvgs(
                 inplace=True,
                 **kwargs,
             )
+
             steps_run.append("compute_hvgs")
+
+            if "highly_variable" not in adata.var.columns:
+                raise ValueError("adata.var['highly_variable'] was not created.")
+
             n_hvgs = int(adata.var["highly_variable"].sum())
 
         except Exception as exc:
@@ -96,7 +103,7 @@ def compute_hvgs(
 
             return adata, {
                 "status": "failed",
-                "message": (f"HVG computation failed with flavor='{flavor}'. "),
+                "message": f"HVG computation failed with flavor='{flavor}'.",
                 "warnings": warnings,
                 "results": {
                     "n_cells": int(adata.n_obs),

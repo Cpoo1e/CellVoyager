@@ -93,6 +93,13 @@ def qc_summary(
         "had_mito_column_before_qc": "mt" in adata.var.columns,
     }
 
+    if not adata.raw:
+        adata.raw = adata.copy()
+        warnings.append(
+            "adata.raw was not set. A copy of the current adata was assigned to adata.raw."
+        )
+        processing_state["raw_exists"] = True
+
     if "highly_variable" in adata.var.columns:
         processing_state["n_hvgs"] = int(adata.var["highly_variable"].sum())
     else:

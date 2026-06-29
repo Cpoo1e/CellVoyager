@@ -96,8 +96,21 @@ def dimensional_reduction_summary(
         n_features_for_pca = int(adata.n_vars)
         use_highly_variable_for_pca = False
 
+    # Default safe PC values, valid even when run_pca=False
+    safe_n_pcs = None
+    safe_neighbors_n_pcs = None
+
+    if "X_pca" in adata.obsm:
+        existing_n_pcs = int(adata.obsm["X_pca"].shape[1])
+        safe_n_pcs = existing_n_pcs
+        safe_neighbors_n_pcs = min(int(neighbors_n_pcs), existing_n_pcs)
+    else:
+        safe_n_pcs = min(int(n_pcs), int(adata.n_obs) - 1, int(n_features_for_pca) - 1)
+    safe_neighbors_n_pcs = min(int(neighbors_n_pcs), safe_n_pcs)
+
     if run_pca:
-        safe_n_pcs = min(n_pcs, adata.n_obs - 1, n_features_for_pca - 1)
+        safe_n_pcs = min(int(n_pcs), int(adata.n_obs) - 1, int(n_features_for_pca) - 1)
+        safe_neighbors_n_pcs = min(int(neighbors_n_pcs), safe_n_pcs)
 
         if safe_n_pcs < n_pcs:
             warnings.append(
