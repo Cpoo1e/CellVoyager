@@ -8,7 +8,7 @@ set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\60k_cells_raw.h5ad"
 set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_raw_60k.txt"
 set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Analysis_sweep\logs\Claude\benchmarks"
-set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\benchmarks\claude_opus_48_r1_unprocessed_short_analysis_1_plan.json"
+set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\benchmarks\final_60kclaude_haiku_45_analysis_1_plan.json"
 set "output_dir=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\benchmarks"
 
 cd /d "%ROOT%"
@@ -25,8 +25,8 @@ REM -------- Cloud models --------
 @REM call :RUN_CLOUD "gpt-5.5" "gpt55"
 
 REM -------- Claude models --------
-call :RUN_CLAUDE "anthropic/claude-sonnet-4-6" "claude-haiku-4-5-20251001" "claude_haiku_45"
-@REM call :RUN_CLAUDE "anthropic/claude-sonnet-4-6" "claude-sonnet-4-6" "claude_sonnet_46"
+call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-haiku-4-5-20251001" "claude_haiku_45"
+@REM call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-sonnet-4-6" "claude_sonnet_46"
 @REM call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-opus-4-8" "claude_opus_48"
 
 
@@ -71,7 +71,7 @@ set "NAME=%~2"
 
 for /L %%R in (1,1,%REPEATS%) do (
     echo Running %NAME% repeat %%R...
-    python .\CellVoyager\run_cellvoyager.py ^
+    python .\CellVoyager\CellVoyager\run_cellvoyager.py ^
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
       --from-analysis-json "%ANALYSIS_JSON%" ^
@@ -97,13 +97,13 @@ for /L %%R in (1,1,%REPEATS%) do (
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
       --output-dir "%output_dir%" ^
-      --analysis-name "%NAME%_r%%R_reasoning_opus" ^
+      --analysis-name "ME.CFS_multi" ^
       --execution-mode claude ^
       --model-name "%MODEL%" ^
       --execution-model "%execution_model%" ^
       --log-home "%LOGS%" ^
-      --log-prompts ^
-      --stop-jupyter-on-complete
+      --stop-jupyter-on-complete ^
+      --no-self-critique
 )
 
 exit /b
