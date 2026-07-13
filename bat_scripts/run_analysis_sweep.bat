@@ -3,21 +3,21 @@ setlocal
 
 REM CellVoyager analysis-generation sweep
 
-set "REPEATS=1"
+set "REPEATS=3"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\60k_cells_raw.h5ad"
 set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_raw_60k.txt"
 set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Analysis_sweep\logs\Claude\benchmarks"
 set "ANALYSIS_JSON=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\benchmarks\final_60kclaude_haiku_45_analysis_1_plan.json"
-set "output_dir=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Analysis_tests\Claude\benchmarks"
+set "output_dir=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Hypotheis"
 
 cd /d "%ROOT%"
 
 REM -------- Local models --------
-@REM call :RUN_LOCAL "gemma3:4b" "gemma3_4b"
-@REM call :RUN_LOCAL "llama3.1:8b" "llama31_8b"
-@REM call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
-@REM call :RUN_LOCAL "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507"
+call :RUN_LOCAL "gemma3:4b" "gemma3_4b"
+call :RUN_LOCAL "llama3.1:8b" "llama31_8b"
+call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
+call :RUN_LOCAL "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507"
 
 REM -------- Cloud models --------
 @REM call :RUN_CLOUD "gpt-4o" "gpt4o"

@@ -3,18 +3,20 @@ setlocal
 
 REM CellVoyager hypothesis-generation sweep
 
-set "REPEATS=3"
+set "REPEATS=2"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
-set "H5AD=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\processed_filtered.h5ad"
-set "PAPER=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\No_paper_background.txt"
-set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\msc-project\results\logs\Analysis_sweep"
+set "H5AD_processed=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\processed_filtered.h5ad"
+set "PAPER_processed=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_Processed.txt"
+set "H5AD_unprocessed=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\processed_filtered.h5ad"
+set "PAPER_unprocessed=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_Unprocessed.txt"
+set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Hypotheis"
 
 cd /d "%ROOT%"
 
 REM -------- Local models --------
-@REM call :RUN_LOCAL "gemma3:4b" "gemma3_4b"
-@REM call :RUN_LOCAL "llama3.1:8b" "llama31_8b"
-@REM call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
+call :RUN_LOCAL "gemma3:4b" "gemma3_4b"
+call :RUN_LOCAL "llama3.1:8b" "llama31_8b"
+call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
 call :RUN_LOCAL "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507"
 
 REM -------- Cloud models --------
@@ -39,13 +41,14 @@ for /L %%R in (1,1,%REPEATS%) do (
     python .\CellVoyager\run_cellvoyager.py ^
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
-      --analysis-name "%NAME%_r%%R" ^
+      --analysis-name "%NAME%_r%%R_BASIC_PROCESSED" ^
       --model-name "ollama_chat/%MODEL%" ^
       --api-base-url "http://localhost:11434" ^
       --log-home "%LOGS%" ^
       --log-prompts ^
       --execution-mode legacy ^
-      --from-analysis-json C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\BenchMarks\sonnet4_6_benchmark_shortPrompt_20260615_144856\sonnet4_6_benchmark_shortPrompt_analysis_1_plan.json
+      --hypothesis-debug ^
+      --output-dir C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Hypotheis\logs\Short_nontailered_prompt
 )
 
 ollama stop "%MODEL%" >nul
