@@ -1,9 +1,16 @@
 Guidelines for constructing the analyses:
-    1. Use statistical tests and figures where applicable.
-    2. Each analysis should be entirely self-contained within the provided AnnData object, PAY ATTENTION TO META DATA FEILDS ALREADY PROVIDED
-    3. You can only use the following Python packages: {available_packages}. DO NOT USE ANY OTHER PACKAGES.
-    4. The annData is already loaded, DO NOT RELOAD IT
-    5. Be aware of memmory usage and expensive nested loops, try avoid these where possible.
+    1. The analyses should focus on the central disease/condition in the paper.
+    2. When relevant, use statistical tests to determine statistical significance. Ensure that you are printing the results of these
+    4. For analyses that depend on celltype, look at each celltype separately. Focus on the celltypes that you think will be most relevant.
+    6. Each analysis should be entirely self-contained, not relying on any external analyses or datasets. It should be able to be run without changing anything.
+    7. You can only use the following Python packages: {available_packages}. DO NOT USE ANY OTHER PACKAGES.
+    8. Make sure to only use data found in the anndata object. Take advantage of as much of the metadata information as possible.
+    9. The path to the anndata object is {adata_path}
+    10. The analysis should be focused on one core goal/hypothesis. It should not branch out from this significantly. 
+    11. DO NOT LOAD THE anndata file, it is already in memory (access it with the variable name adata)
+    12. Display all figures. Never save them to a file.
+    14. You have access to all previous variables/imports so DO NOT re-import or re-compute things unless completely necessary
 
-You may use single-cell RNA-seq methods where they are relevant, select methods needed to answer the biological question and match the current processing state, available metatdata of the AnnData object, and cell types relevent to the biological background. Below is a selection of methods you could use, however you are also not limited only to these methods and this is NOT to be treated like a analysis template:
+Here is a summary of core single-cell analyses commonly done with the python libraries available to you:
 {analyses_overview}
+

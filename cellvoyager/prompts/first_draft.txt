@@ -5,6 +5,22 @@ Specifically, you will return a hypothesis, a series of analysis steps towards t
 
 Ensure that your output is in the specified JSON format.
 
+CRITICAL STRUCTURED OUTPUT RULES:
+Return ONLY valid JSON.
+Do not use XML tags.
+Do not use <invoke>, <parameter>, or </parameter>.
+Do not put analysis_plan, first_step_code, code_description, or summary inside the hypothesis string.
+
+The response must have exactly these top-level keys:
+- hypothesis
+- analysis_plan
+- first_step_code
+- code_description
+- summary
+
+analysis_plan must be a JSON list of strings.
+first_step_code must be a JSON string.
+
 {CODING_GUIDELINES}
 
 For the analysis plan, think of the analysis plan as a scientific workflow:

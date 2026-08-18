@@ -26,8 +26,8 @@ REM -------- Cloud models --------
 
 REM -------- Claude models --------
 call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-haiku-4-5-20251001" "claude_haiku_45"
-@REM call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-sonnet-4-6" "claude_sonnet_46"
-@REM call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-opus-4-8" "claude_opus_48"
+call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-sonnet-4-6" "claude_sonnet_46"
+call :RUN_CLAUDE "anthropic/claude-opus-4-8" "claude-opus-4-8" "claude_opus_48"
 
 
 pause

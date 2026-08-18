@@ -3,21 +3,26 @@ setlocal
 
 REM CellVoyager hypothesis-generation sweep
 
-set "REPEATS=2"
+set "REPEATS=5"
 set "ROOT=C:\Users\ckcPo\Documents\Masters\Main_Project"
 set "H5AD_processed=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\processed_filtered.h5ad"
 set "PAPER_processed=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_Processed.txt"
-set "H5AD_unprocessed=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\processed_filtered.h5ad"
+set "H5AD_unprocessed=C:\Users\ckcPo\Documents\Masters\Main_Project\data\processed\unprocessed.h5ad"
 set "PAPER_unprocessed=C:\Users\ckcPo\Documents\Masters\Main_Project\data\summaries\Basic_Unprocessed.txt"
-set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Hypotheis"
+set "LOGS=C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Hypotheis\logs\Short_nontailered_prompt"
 
 cd /d "%ROOT%"
 
 REM -------- Local models --------
-call :RUN_LOCAL "gemma3:4b" "gemma3_4b"
-call :RUN_LOCAL "llama3.1:8b" "llama31_8b"
-call :RUN_LOCAL "mistral-nemo:12b" "mistral_nemo_12b"
-call :RUN_LOCAL "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507"
+call :RUN_LOCAL_PROCESSED "gemma3:4b" "gemma3_4b"
+call :RUN_LOCAL_PROCESSED "llama3.1:8b" "llama31_8b"
+call :RUN_LOCAL_PROCESSED "mistral-nemo:12b" "mistral_nemo_12b"
+call :RUN_LOCAL_PROCESSED "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507"
+call :RUN_LOCAL_UNPROCESSED "gemma3:4b" "gemma3_4b" 
+call :RUN_LOCAL_UNPROCESSED "llama3.1:8b" "llama31_8b"
+call :RUN_LOCAL_UNPROCESSED "mistral-nemo:12b" "mistral_nemo_12b"
+call :RUN_LOCAL_UNPROCESSED "qwen3:30b-a3b-instruct-2507-q4_K_M" "qwen3_30b_a3b_instruct2507"
+
 
 REM -------- Cloud models --------
 @REM call :RUN_CLOUD "gpt-4o" "gpt4o"
@@ -28,7 +33,9 @@ pause
 exit /b
 
 
-:RUN_LOCAL
+:RUN_LOCAL_PROCESSED
+set "H5AD=%H5AD_processed%"
+set "PAPER=%PAPER_processed%"
 set "MODEL=%~1"
 set "NAME=%~2"
 
@@ -41,7 +48,7 @@ for /L %%R in (1,1,%REPEATS%) do (
     python .\CellVoyager\run_cellvoyager.py ^
       --h5ad-path "%H5AD%" ^
       --paper-path "%PAPER%" ^
-      --analysis-name "%NAME%_r%%R_BASIC_PROCESSED" ^
+      --analysis-name "%NAME%_r%%R_PROCESSED" ^
       --model-name "ollama_chat/%MODEL%" ^
       --api-base-url "http://localhost:11434" ^
       --log-home "%LOGS%" ^
@@ -53,6 +60,35 @@ for /L %%R in (1,1,%REPEATS%) do (
 
 ollama stop "%MODEL%" >nul
 exit /b
+
+:RUN_LOCAL_UNPROCESSED
+set "H5AD=%H5AD_unprocessed%"
+set "PAPER=%PAPER_unprocessed%"
+set "MODEL=%~1"
+set "NAME=%~2"
+
+echo.
+echo Loading local model: %MODEL%
+ollama run "%MODEL%" "Reply with exactly OK" >nul
+
+for /L %%R in (1,1,%REPEATS%) do (
+    echo Running %NAME% repeat %%R...
+    python .\CellVoyager\run_cellvoyager.py ^
+      --h5ad-path "%H5AD%" ^
+      --paper-path "%PAPER%" ^
+      --analysis-name "%NAME%_r%%R_UNPROCESSED" ^
+      --model-name "ollama_chat/%MODEL%" ^
+      --api-base-url "http://localhost:11434" ^
+      --log-home "%LOGS%" ^
+      --log-prompts ^
+      --execution-mode legacy ^
+      --hypothesis-debug ^
+      --output-dir C:\Users\ckcPo\Documents\Masters\Main_Project\outputs\Hypotheis\logs\Short_nontailered_prompt
+)
+
+ollama stop "%MODEL%" >nul
+exit /b
+
 
 
 :RUN_CLOUD
