@@ -2,6 +2,19 @@
 <img src="gui/assets/logo.jpeg" alt="CellVoyager Logo" width="700">
 </div>
 
+# About this fork
+
+This repository is a modified fork of the original CellVoyager repository. The changes were developed as part of an MSc Bioinformatics project focused on evaluating and improving agentic single-cell RNA-seq analysis.
+
+Compared with the original CellVoyager implementation, this fork adds:
+
+- Local LLM support for hypothesis generation, including Ollama/OpenAI-compatible API endpoints.
+- Benchmarking and reproducibility controls, including a hypothesis-generation-only mode and the ability to execute previously saved analysis plans without regenerating hypotheses.
+- multi-LLM execution, allowing a higher-capability model to provide biological reasoning while a separate model performs notebook/code execution.
+- Reusable scRNA-seq analysis blocks that can be called by the agent for QC/preprocessing, highly variable gene selection, dimensionality reduction/clustering, and cell-type annotation.
+- Prompt, logging, and batch-run changes used to support evaluation of CellVoyager across models and datasets.
+
+
 # Demo
 To try out the CellVoyager UI, check out the [CellVoyager demo](https://cellvoyager.org).
 
