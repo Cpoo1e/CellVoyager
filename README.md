@@ -103,6 +103,11 @@ python run_cellvoyager.py --h5ad-path PATH_TO_H5AD_DATASET \
 | `--num-analyses` | Number of analyses to run (default: 1) |
 | `--max-iterations` | Max iterations per analysis (default: 8) |
 | `--interactive` | Pause after each step so you can edit the notebook in Jupyter |
+| `--execution-model` |	Model used by the Claude notebook execution agent. Can be set separately from the hypothesis/reasoning model for multi-LLM experiments |
+| `--local-llm` |	Enable local LLM use for hypothesis generation, for example with Ollama |
+| `--api-base-url` |	Base URL for the LLM API, e.g. http://localhost:11434 for Ollama |
+| `--hypothesis-debug` |	Run hypothesis generation only, print the full response, and exit without creating or executing notebooks |
+| `--from-analysis-json` | PATH	Skip hypothesis generation and directly execute a saved *_plan.json analysis plan |
 
 Run `python run_cellvoyager.py --help` for the full list of options.
 
